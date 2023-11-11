@@ -1,0 +1,5 @@
+to run the ads ten time faster - (can just add in the address bar apparently)
+
+javascript:(function(){let x=document.querySelector('video');x.playbackRate=10;})();
+
+
