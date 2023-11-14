@@ -3,7 +3,6 @@
   "name": "Auto Ad Skipper",
   "version": "1.0.0",
   "permissions": [
-    "activeTab",
     "storage"
   ],
   "host_permissions": [
