@@ -21,7 +21,7 @@ chrome.storage.sync.get('activationState', function(data) {
 
 
         } else {
-          console.log("Skip Ad button not found");
+          console.log("Searching for Skip Ad button");
         }
       };
   
