@@ -1,4 +1,4 @@
-# Auto-Ad-Skipper-for-YouTube
+# Auto-Ad-Skipper-for-YouTube (AASFY)
 Chrome Extension that automatically skips YouTube ads 
 
 
@@ -22,12 +22,24 @@ Also,
 - the code is open source and available to download in GitHub
 - any developer collabroation is welcome
 
-*V1.0.0 doesn't do anything on unskippable ads.*
-
 
 Features in pipeline for future release - 
 
 - mute the audio of the chrome tab for unskippable ads, and bring back to original audio levels after the ad finished playing.
 - fast forward through the unskippable ads.
 - reduce brightness to lowest when unskippable ads are playing, and bring back to original brightness levels after the ad finished playing.
+
+*V1.0.0 doesn't do anything on unskippable ads.*
+
+
+Release history:
+
+V1.1.0 - Added CSS file, updated name, description, appearance, logo, screenshot
+V1.0.0 - Initial Release
+
+
+
+
+
+
 

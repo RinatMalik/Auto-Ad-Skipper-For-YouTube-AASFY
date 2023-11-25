@@ -8,7 +8,7 @@ chrome.storage.sync.get('activationState', function(data) {
     const isActive = initialActivationState === 'active';
   
     if (isActive) {
-      console.log("Auto Ad Skipper for YouTube Extension is Active");
+      console.log("Auto Ad Skipper for YouTube (AASFY) is Active");
 
 
       const clickSkipAd = () => {
