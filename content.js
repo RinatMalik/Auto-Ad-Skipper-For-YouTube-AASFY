@@ -12,7 +12,8 @@ chrome.storage.sync.get('activationState', function(data) {
 
 
       const clickSkipAd = () => {
-         const skipAdButton = document.querySelector('.ytp-ad-skip-button-container');
+        const skipAdButton = document.querySelector('.ytp-ad-skip-button') ||
+                              document.querySelector('[class^="ytp-ad-skip-button"]');
   
         if (skipAdButton) {
           
