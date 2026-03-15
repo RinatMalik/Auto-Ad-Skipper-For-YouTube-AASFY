@@ -1,32 +1,136 @@
 /* popup.css */
 body {
-    font-family: 'Arial', sans-serif;
-    background-color: #f0f0f0;
-    margin: 20px;
-    min-width: 350px; /* Set your desired maximum width */
-    padding: 20px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-  }
-  
-  h2 {
-    color: #333;
-  }
-  
-  p {
-    color: #555;
-  }
-  
-  button {
-    background-color: #4caf50;
-    color: white;
-    padding: 10px 15px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 16px;
-  }
-  
-  button:hover {
-    background-color: #45a049;
-  }
-  
+  font-family: Arial, sans-serif;
+  background-color: #f0f0f0;
+  margin: 16px;
+  min-width: 360px;
+  padding: 16px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+h2 {
+  color: #222;
+  margin: 0 0 10px;
+}
+
+h3 {
+  margin: 0 0 8px;
+  color: #2f2f2f;
+}
+
+p {
+  color: #555;
+  line-height: 1.4;
+  margin: 0 0 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.pill {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: #ddd;
+  color: #333;
+}
+
+.pill.active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.pill.inactive {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+button {
+  background-color: #4caf50;
+  color: #fff;
+  padding: 9px 14px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+button:hover {
+  background-color: #45a049;
+}
+
+.debug-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  margin-bottom: 14px;
+  color: #333;
+}
+
+.custom-identifiers {
+  background: #fff;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.help-text {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+}
+
+input[type='text'] {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
+
+#identifierList {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+#identifierList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+#identifierList li:last-child {
+  border-bottom: none;
+}
+
+#identifierList li.empty {
+  color: #777;
+  font-size: 13px;
+}
+
+button.remove {
+  background: #ef4444;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+button.remove:hover {
+  background: #dc2626;
+}
