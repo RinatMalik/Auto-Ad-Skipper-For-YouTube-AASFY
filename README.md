@@ -37,9 +37,9 @@ Release history:
 V1.1.0 - Added CSS file, updated name, description, appearance, logo, screenshot
 V1.0.0 - Initial Release
 
+## Development notes (latest)
 
-
-
-
-
+- Skip detection now uses multiple strategies (selector list + semantic text matching) instead of a single hard-coded selector.
+- Activation/deactivation updates live via storage change listeners; no page refresh is required.
+- Debug mode can be toggled from popup, and custom selectors/identification strings can be added from popup and stored in `chrome.storage.sync`.
 
