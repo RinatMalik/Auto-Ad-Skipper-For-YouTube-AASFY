@@ -96,7 +96,27 @@
     return element.closest('button, [role="button"]') || element;
   };
 
-  const isAdLikelyShowing = () => {
+  const getAdSignals = () => {
+    const moviePlayerAdShowing = Boolean(document.querySelector('#movie_player.ad-showing'));
+    const adModuleVisible = isSelectorVisible('.video-ads.ytp-ad-module');
+    const adOverlayVisible = isSelectorVisible('.ytp-ad-player-overlay');
+    const adPreviewVisible = isSelectorVisible('.ytp-ad-preview-container');
+    const adBadgeVisible = isSelectorVisible('.ytp-ad-text, .ytp-ad-simple-ad-badge');
+    const skipControlVisible = DEFAULT_SELECTORS.some((selector) => isSelectorVisible(selector));
+
+    return {
+      moviePlayerAdShowing,
+      adModuleVisible,
+      adOverlayVisible,
+      adPreviewVisible,
+      adBadgeVisible,
+      skipControlVisible
+    };
+  };
+
+  const isAdLikelyShowing = (signals = getAdSignals()) => {
+
+    // Use strong positive signals first; avoid false positives from generic overlays alone.
     return Boolean(
       document.querySelector('.ad-showing') ||
         document.querySelector('.video-ads.ytp-ad-module') ||
@@ -231,8 +251,9 @@
   };
 
   const fireSyntheticClick = (target) => {
-    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((eventName) => {
-      target.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
+    ['pointerdown', 'pointerup'].forEach((eventName) => {
+      const PointerCtor = window.PointerEvent || window.MouseEvent;
+      target.dispatchEvent(new PointerCtor(eventName, { bubbles: true, cancelable: true, view: window }));
     });
   };
 
@@ -273,8 +294,10 @@
       return;
     }
 
-    const adLikelyShowing = isAdLikelyShowing();
+    const adSignals = getAdSignals();
+    const adLikelyShowing = isAdLikelyShowing(adSignals);
     debugLog('Ad state:', adLikelyShowing ? 'likely-showing' : 'not-detected');
+    debugLog('Ad signals:', adSignals);
 
     if (!adLikelyShowing) {
       return;
