@@ -86,8 +86,7 @@
     const isDisabledByAttr = element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true';
     const hasDisabledClass = (element.className || '').toString().toLowerCase().includes('disabled');
     const opacity = Number.parseFloat(style.opacity || '1');
-    const hasReadyClass = (element.className || '').toString().includes('ytp-ad-component--clickable');
-    const looksInteractable = Number.isNaN(opacity) ? true : opacity >= 0.95 || hasReadyClass;
+    const looksInteractable = Number.isNaN(opacity) ? true : opacity >= 0.98;
 
     return !isDisabledByAttr && !hasDisabledClass && looksInteractable;
   };
@@ -235,12 +234,6 @@
     return rankedCandidates[0]?.element || null;
   };
 
-  const fireSyntheticClick = (target) => {
-    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((eventName) => {
-      target.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
-    });
-  };
-
   const clearPendingClick = () => {
     if (state.pendingClickTimeoutId !== null) {
       window.clearTimeout(state.pendingClickTimeoutId);
@@ -261,9 +254,16 @@
     }
 
     state.lastClickTimestamp = now;
-    fireSyntheticClick(target);
+    target.click();
     console.log('AASFY clicked a skip control');
     debugLog('Clicked target:', target.outerHTML?.slice(0, 220) || '<unknown>');
+
+    window.setTimeout(() => {
+      if (state.active && isAdLikelyShowing()) {
+        debugLog('Ad still showing after click; retrying target search');
+        attemptSkipAd();
+      }
+    }, 350);
   };
 
   const scheduleHumanLikeClick = (target) => {
