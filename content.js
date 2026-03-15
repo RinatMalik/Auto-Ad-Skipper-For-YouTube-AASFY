@@ -153,7 +153,8 @@
         signals.adModuleVisible ||
         signals.adOverlayVisible ||
         signals.adPreviewVisible ||
-        signals.adBadgeVisible
+        signals.adBadgeVisible ||
+        signals.skipControlVisible
     );
   };
 
