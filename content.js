@@ -410,6 +410,92 @@
     return clickedAny;
   };
 
+  const clampToViewport = (x, y) => {
+    const maxX = Math.max(0, window.innerWidth - 1);
+    const maxY = Math.max(0, window.innerHeight - 1);
+    return {
+      x: Math.min(maxX, Math.max(0, Math.round(x))),
+      y: Math.min(maxY, Math.max(0, Math.round(y)))
+    };
+  };
+
+  const dispatchPointerSequenceAtPoint = (x, y) => {
+    const { x: cx, y: cy } = clampToViewport(x, y);
+    const elementAtPoint = document.elementFromPoint(cx, cy);
+    if (!(elementAtPoint instanceof HTMLElement)) {
+      return false;
+    }
+
+    const clickable = getClickableElement(elementAtPoint);
+    if (!(clickable instanceof HTMLElement)) {
+      return false;
+    }
+
+    fireSyntheticClick(clickable, { x: cx, y: cy });
+    clickable.click();
+    return true;
+  };
+
+  // Fallback: try point-based clicks across the target rect (helps when wrappers intercept events).
+  const tryCoordinateClickOnTarget = (target) => {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    const rect = target.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return false;
+    }
+
+    const points = [
+      { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+      { x: rect.left + rect.width * 0.25, y: rect.top + rect.height * 0.3 },
+      { x: rect.left + rect.width * 0.75, y: rect.top + rect.height * 0.3 },
+      { x: rect.left + rect.width * 0.25, y: rect.top + rect.height * 0.7 },
+      { x: rect.left + rect.width * 0.75, y: rect.top + rect.height * 0.7 }
+    ];
+
+    let clickedAny = false;
+    points.forEach((point) => {
+      clickedAny = dispatchPointerSequenceAtPoint(point.x, point.y) || clickedAny;
+    });
+
+    if (clickedAny) {
+      debugLog('Performed coordinate fallback clicks on target bounds');
+    }
+
+    return clickedAny;
+  };
+
+  // Fallback: sweep 100x100-ish points in the lower-right player area.
+  const tryLowerRightGridSweep = () => {
+    const moviePlayer = document.getElementById('movie_player');
+    const scopeRect = moviePlayer?.getBoundingClientRect?.() || {
+      left: 0,
+      top: 0,
+      width: window.innerWidth,
+      height: window.innerHeight
+    };
+
+    const right = scopeRect.left + scopeRect.width;
+    const bottom = scopeRect.top + scopeRect.height;
+    const leftLimit = Math.max(scopeRect.left, right - GRID_SWEEP_STEP_PX * 4);
+    const topLimit = Math.max(scopeRect.top, bottom - GRID_SWEEP_STEP_PX * 3);
+
+    let clickedAny = false;
+    for (let y = bottom - GRID_SWEEP_STEP_PX / 2; y >= topLimit; y -= GRID_SWEEP_STEP_PX) {
+      for (let x = right - GRID_SWEEP_STEP_PX / 2; x >= leftLimit; x -= GRID_SWEEP_STEP_PX) {
+        clickedAny = dispatchPointerSequenceAtPoint(x, y) || clickedAny;
+      }
+    }
+
+    if (clickedAny) {
+      debugLog('Performed lower-right grid sweep fallback');
+    }
+
+    return clickedAny;
+  };
+
   // Returns a small randomized delay to make click timing less robotic.
   const getHumanizedDelayMs = () => {
     const span = Math.max(0, HUMANIZED_CLICK_DELAY_MAX_MS - HUMANIZED_CLICK_DELAY_MIN_MS);
@@ -439,7 +525,7 @@
       return;
     }
 
-    const delayMs = getHumanizedDelayMs();
+    const delayMs = isNativeSkipButton(target) || target?.closest?.('.ytp-ad-skip-button-container') ? 0 : getHumanizedDelayMs();
     state.pendingClickTimeoutId = window.setTimeout(() => {
       const queuedTarget = state.pendingClickTarget;
       state.pendingClickTimeoutId = null;
