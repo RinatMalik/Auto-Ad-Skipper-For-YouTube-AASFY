@@ -8,9 +8,32 @@
 </head>
 <body>
   <h2>Auto Ad Skipper For YouTube (AASFY)</h2>
-  <p>This extension constantly looks for the skip ad button in YouTube and presses the button as soon as it is found</p>
-  <p>It works out of the box, no login, no registration or setup required. This is not an Ad Blocker so it is undetectable by YouTube.</p>
-  <button id="activateButton">Activate</button>
+  <p>
+    This extension watches for YouTube ad skip controls and clicks them when available.
+  </p>
+
+  <div class="row">
+    <span id="statusPill" class="pill">Status: Loading...</span>
+    <button id="activateButton">Activate</button>
+  </div>
+
+  <label class="debug-toggle">
+    <input type="checkbox" id="debugToggle">
+    Enable debug mode
+  </label>
+
+  <section class="custom-identifiers">
+    <h3>Custom selector / identifier</h3>
+    <p class="help-text">
+      Add a CSS selector (for example <code>.my-new-skip-button</code>) or text hint (for example <code>skip now</code>).
+    </p>
+    <div class="input-row">
+      <input id="customIdentifierInput" type="text" placeholder="Enter selector or text hint">
+      <button id="addIdentifierButton" type="button">Add</button>
+    </div>
+    <ul id="identifierList"></ul>
+  </section>
+
   <script src="popup.js"></script>
 </body>
 </html>
