@@ -34,6 +34,8 @@
     'button[aria-label*="Skip" i]'
   ];
 
+  const AD_UI_CONTAINERS = ['#movie_player.ad-showing', '.video-ads.ytp-ad-module', '.ytp-ad-player-overlay', '.ytp-ad-module'];
+
   // Multi-language keywords and common phrases used in skip controls.
   const DEFAULT_TEXT_PATTERNS = ['skip', 'skip ad', 'skip ads', 'saltar', 'überspringen', 'ignorer', '跳过'];
 
@@ -126,6 +128,16 @@
     }
   };
 
+  // Skip controls should count only when they are in known ad UI containers.
+  const isSelectorVisibleInAdUi = (selector) => {
+    try {
+      return [...document.querySelectorAll(selector)].some((element) => isElementVisible(element) && isInsideAdUi(element));
+    } catch (error) {
+      debugLog('Ad-UI selector visibility check failed:', selector, error?.message || error);
+      return false;
+    }
+  };
+
   // Reads multiple ad-related UI indicators to reduce false positives.
   const getAdSignals = () => {
     const moviePlayerAdShowing = Boolean(document.querySelector('#movie_player.ad-showing'));
@@ -133,7 +145,8 @@
     const adOverlayVisible = isSelectorVisible('.ytp-ad-player-overlay');
     const adPreviewVisible = isSelectorVisible('.ytp-ad-preview-container');
     const adBadgeVisible = isSelectorVisible('.ytp-ad-text, .ytp-ad-simple-ad-badge');
-    const skipControlVisible = DEFAULT_SELECTORS.some((selector) => isSelectorVisible(selector));
+    const skipControlVisible = DEFAULT_SELECTORS.some((selector) => isSelectorVisibleInAdUi(selector));
+    const adContainerVisible = AD_UI_CONTAINERS.some((selector) => isSelectorVisible(selector));
 
     return {
       moviePlayerAdShowing,
@@ -141,7 +154,8 @@
       adOverlayVisible,
       adPreviewVisible,
       adBadgeVisible,
-      skipControlVisible
+      skipControlVisible,
+      adContainerVisible
     };
   };
 
@@ -154,7 +168,7 @@
         signals.adOverlayVisible ||
         signals.adPreviewVisible ||
         signals.adBadgeVisible ||
-        signals.skipControlVisible
+        (signals.skipControlVisible && signals.adContainerVisible)
     );
   };
 
@@ -372,6 +386,9 @@
     window.setTimeout(() => {
       if (state.active && isAdLikelyShowing()) {
         debugLog('Ad still showing after click; retrying target search');
+        if (tryPlayerApiSkip()) {
+          console.log('AASFY invoked player API skip fallback after click retry');
+        }
         attemptSkipAd();
       }
     }, RETRY_AFTER_CLICK_MS);
@@ -395,6 +412,13 @@
     const target = findSkipTarget();
     if (target) {
       debugLog('Skip target detected; attempting click');
+
+      // Some YouTube variants ignore synthetic clicks unless a trusted gesture exists.
+      // Invoke known player APIs in parallel when available.
+      if (tryPlayerApiSkip()) {
+        console.log('AASFY invoked player API skip fallback before UI click');
+      }
+
       queueClickTarget(target);
     } else {
       debugLog('No skip target found in current cycle');
