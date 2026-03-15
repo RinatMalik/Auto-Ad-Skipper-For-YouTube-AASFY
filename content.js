@@ -1,17 +1,30 @@
 // content.js
+//
+// This script runs on YouTube pages and is responsible for:
+// 1) reading extension settings,
+// 2) detecting when an ad is currently showing,
+// 3) finding the most likely "Skip" control,
+// 4) attempting a robust click sequence,
+// 5) retrying when YouTube delays enablement of the skip button.
 (() => {
+  // Build serial to help confirm the loaded extension version in logs/UI.
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-01';
+
+  // Storage keys used across popup + content script.
   const STORAGE_KEYS = {
     activationState: 'activationState',
     debugMode: 'debugMode',
     customSkipIdentifiers: 'customSkipIdentifiers'
   };
 
+  // Default settings used when a key does not yet exist in storage.
   const DEFAULTS = {
     activationState: 'active',
     debugMode: false,
     customSkipIdentifiers: []
   };
 
+  // Known skip-button selectors that YouTube has used historically.
   const DEFAULT_SELECTORS = [
     '.ytp-ad-skip-button-modern',
     '.ytp-ad-skip-button',
@@ -21,11 +34,14 @@
     'button[aria-label*="Skip" i]'
   ];
 
+  // Multi-language keywords and common phrases used in skip controls.
   const DEFAULT_TEXT_PATTERNS = ['skip', 'skip ad', 'skip ads', 'saltar', 'überspringen', 'ignorer', '跳过'];
 
+  // Timing controls to avoid over-clicking and to support short retries.
   const CLICK_DEBOUNCE_MS = 700;
   const RETRY_AFTER_CLICK_MS = 350;
 
+  // Runtime state cache.
   const state = {
     active: DEFAULTS.activationState === 'active',
     debugMode: DEFAULTS.debugMode,
@@ -36,6 +52,7 @@
     lastClickTimestamp: 0
   };
 
+  // Debug logger (active only when debugMode is enabled from popup).
   const debugLog = (...parts) => {
     if (!state.debugMode) {
       return;
@@ -44,6 +61,7 @@
     console.log('[AASFY DEBUG]', ...parts);
   };
 
+  // Normalizes custom selector/text entries provided by the user.
   const sanitizeCustomIdentifiers = (value) => {
     if (!Array.isArray(value)) {
       return [];
@@ -55,6 +73,7 @@
       .slice(0, 25);
   };
 
+  // True only when an element is visually and geometrically visible.
   const isElementVisible = (element) => {
     if (!(element instanceof HTMLElement)) {
       return false;
@@ -72,6 +91,7 @@
     );
   };
 
+  // True only when an element appears actionable (not disabled/faded).
   const isElementEnabled = (element) => {
     if (!(element instanceof HTMLElement)) {
       return false;
@@ -88,6 +108,7 @@
     return !isDisabledByAttr && !hasDisabledClass && looksInteractable;
   };
 
+  // Finds nearest clickable ancestor because text spans are often nested.
   const getClickableElement = (element) => {
     if (!(element instanceof HTMLElement)) {
       return null;
@@ -96,6 +117,17 @@
     return element.closest('button, [role="button"]') || element;
   };
 
+  // Helper to safely check visibility of any CSS selector.
+  const isSelectorVisible = (selector) => {
+    try {
+      return [...document.querySelectorAll(selector)].some((element) => isElementVisible(element));
+    } catch (error) {
+      debugLog('Selector visibility check failed:', selector, error?.message || error);
+      return false;
+    }
+  };
+
+  // Reads multiple ad-related UI indicators to reduce false positives.
   const getAdSignals = () => {
     const moviePlayerAdShowing = Boolean(document.querySelector('#movie_player.ad-showing'));
     const adModuleVisible = isSelectorVisible('.video-ads.ytp-ad-module');
@@ -114,17 +146,20 @@
     };
   };
 
+  // Final ad-likelihood decision used to gate skip attempts.
   const isAdLikelyShowing = (signals = getAdSignals()) => {
-
     // Use strong positive signals first; avoid false positives from generic overlays alone.
     return Boolean(
-      document.querySelector('.ad-showing') ||
-        document.querySelector('.video-ads.ytp-ad-module') ||
-        document.querySelector('.ytp-ad-player-overlay') ||
-        document.querySelector('.ytp-ad-preview-container')
+      signals.moviePlayerAdShowing ||
+        signals.adModuleVisible ||
+        signals.adOverlayVisible ||
+        signals.adPreviewVisible ||
+        signals.adBadgeVisible ||
+        signals.skipControlVisible
     );
   };
 
+  // Ensures candidate controls are part of known ad-related UI zones.
   const isInsideAdUi = (element) => {
     if (!(element instanceof HTMLElement)) {
       return false;
@@ -138,6 +173,7 @@
     return Boolean(adShowingPlayer && adShowingPlayer.contains(element));
   };
 
+  // Collects searchable text from visible label sources.
   const getElementText = (element) => {
     const rawText = [
       element.textContent || '',
@@ -148,6 +184,7 @@
     return rawText.trim().toLowerCase();
   };
 
+  // Selector-based candidate discovery.
   const collectSelectorCandidates = (selectors) => {
     const candidates = [];
 
@@ -163,6 +200,7 @@
     return candidates;
   };
 
+  // Text/semantic candidate discovery for evolving YouTube markup.
   const collectSemanticCandidates = (patterns) => {
     const semanticCandidates = [];
     const clickableElements = document.querySelectorAll('button, [role="button"], .ytp-button');
@@ -186,6 +224,7 @@
     return semanticCandidates;
   };
 
+  // Candidate ranking engine that picks the strongest skip target.
   const findSkipTarget = () => {
     const normalizedCustomIdentifiers = sanitizeCustomIdentifiers(state.customSkipIdentifiers);
     const selectorCandidates = [
@@ -250,6 +289,7 @@
     return rankedCandidates[0]?.element || null;
   };
 
+  // Uses pointer events in addition to .click() for better compatibility.
   const fireSyntheticClick = (target) => {
     ['pointerdown', 'pointerup'].forEach((eventName) => {
       const PointerCtor = window.PointerEvent || window.MouseEvent;
@@ -257,6 +297,31 @@
     });
   };
 
+  // Invokes YouTube player API fallback when UI click path is blocked.
+  const tryPlayerApiSkip = () => {
+    const moviePlayer = document.getElementById('movie_player');
+    if (!moviePlayer) {
+      return false;
+    }
+
+    const skipMethods = ['skipAd', 'skipVideo', 'onSkipAd'];
+    for (const methodName of skipMethods) {
+      const method = moviePlayer[methodName];
+      if (typeof method === 'function') {
+        try {
+          method.call(moviePlayer);
+          debugLog(`Called movie_player.${methodName}() fallback`);
+          return true;
+        } catch (error) {
+          debugLog(`movie_player.${methodName}() failed`, error?.message || error);
+        }
+      }
+    }
+
+    return false;
+  };
+
+  // Performs a guarded click flow with debounce + eligibility checks.
   const clickTarget = (target) => {
     const now = Date.now();
     if (now - state.lastClickTimestamp < CLICK_DEBOUNCE_MS) {
@@ -275,7 +340,9 @@
     }
 
     state.lastClickTimestamp = now;
+    // Primary action.
     target.click();
+    // Secondary synthetic events for UI layers that require pointer lifecycle.
     fireSyntheticClick(target);
 
     console.log('AASFY clicked a skip control');
@@ -289,6 +356,7 @@
     }, RETRY_AFTER_CLICK_MS);
   };
 
+  // Single pass: detect ad state, then find and click skip if possible.
   const attemptSkipAd = () => {
     if (!state.active) {
       return;
@@ -305,12 +373,17 @@
 
     const target = findSkipTarget();
     if (target) {
+      debugLog('Skip target detected; attempting click');
       clickTarget(target);
     } else {
       debugLog('No skip target found in current cycle');
+      if (tryPlayerApiSkip()) {
+        console.log('AASFY invoked player API skip fallback');
+      }
     }
   };
 
+  // Coalesces frequent mutation bursts into one animation-frame attempt.
   const queueObserverAttempt = () => {
     if (state.observerQueued) {
       return;
@@ -323,6 +396,7 @@
     });
   };
 
+  // Tears down all timers/observers.
   const stopMonitoring = () => {
     if (state.intervalId !== null) {
       clearInterval(state.intervalId);
@@ -335,6 +409,7 @@
     }
   };
 
+  // Starts interval + mutation observer based monitoring.
   const startMonitoring = () => {
     stopMonitoring();
 
@@ -351,6 +426,7 @@
     attemptSkipAd();
   };
 
+  // Applies storage settings to runtime state and (re)starts monitoring.
   const applySettings = (settings) => {
     const previousActive = state.active;
 
@@ -379,6 +455,7 @@
     }
   };
 
+  // Initial bootstrap: load storage settings and begin active monitoring.
   const loadInitialSettings = () => {
     chrome.storage.sync.get(DEFAULTS, (result) => {
       const mergedSettings = {
@@ -391,7 +468,7 @@
       applySettings(mergedSettings);
 
       if (state.active) {
-        console.log('Auto Ad Skipper for YouTube (AASFY) is Active');
+        console.log(`Auto Ad Skipper for YouTube (AASFY) is Active | Build ${BUILD_SERIAL}`);
         startMonitoring();
       }
     });
