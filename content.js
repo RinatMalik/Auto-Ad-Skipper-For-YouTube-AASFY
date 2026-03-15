@@ -21,6 +21,12 @@
     'button[aria-label*="Skip" i]'
   ];
 
+  const DEFAULT_TEXT_PATTERNS = ['skip', 'skip ad', 'skip ads', 'saltar', 'überspringen', 'ignorer', '跳过'];
+
+  const HUMAN_DELAY_MS = {
+    min: 40,
+    max: 260
+  };
   const DEFAULT_TEXT_PATTERNS = [
     'skip',
     'skip ad',
@@ -38,6 +44,7 @@
     intervalId: null,
     observer: null,
     observerQueued: false,
+    pendingClickTimeoutId: null,
     lastClickTimestamp: 0
   };
 
@@ -48,6 +55,8 @@
 
     console.log('[AASFY DEBUG]', ...parts);
   };
+
+  const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
   const sanitizeCustomIdentifiers = (value) => {
     if (!Array.isArray(value)) {
@@ -82,6 +91,13 @@
       return false;
     }
 
+    const style = window.getComputedStyle(element);
+    const isDisabledByAttr = element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true';
+    const hasDisabledClass = (element.className || '').toString().toLowerCase().includes('disabled');
+    const opacity = Number.parseFloat(style.opacity || '1');
+    const looksInteractable = Number.isNaN(opacity) ? true : opacity >= 0.98;
+
+    return !isDisabledByAttr && !hasDisabledClass && looksInteractable;
     const isDisabledByAttr = element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true';
     const hasDisabledClass = (element.className || '').toString().toLowerCase().includes('disabled');
     return !isDisabledByAttr && !hasDisabledClass;
@@ -98,6 +114,9 @@
   const isAdLikelyShowing = () => {
     return Boolean(
       document.querySelector('.ad-showing') ||
+        document.querySelector('.video-ads.ytp-ad-module') ||
+        document.querySelector('.ytp-ad-player-overlay') ||
+        document.querySelector('.ytp-ad-preview-container')
       document.querySelector('.video-ads.ytp-ad-module') ||
       document.querySelector('.ytp-ad-player-overlay') ||
       document.querySelector('.ytp-ad-preview-container')
@@ -172,6 +191,7 @@
       ...collectSelectorCandidates(normalizedCustomIdentifiers)
     ];
 
+    const textPatterns = [...DEFAULT_TEXT_PATTERNS, ...normalizedCustomIdentifiers.map((entry) => entry.toLowerCase())];
     const textPatterns = [
       ...DEFAULT_TEXT_PATTERNS,
       ...normalizedCustomIdentifiers.map((entry) => entry.toLowerCase())
@@ -210,6 +230,10 @@
         meta.score += 2;
       }
 
+      if (classText.includes('ytp-ad-component--clickable')) {
+        meta.score += 3;
+      }
+
       if (clickable.closest('.ytp-ad-skip-button-container')) {
         meta.score += 3;
       }
@@ -229,6 +253,14 @@
     return rankedCandidates[0]?.element || null;
   };
 
+  const clearPendingClick = () => {
+    if (state.pendingClickTimeoutId !== null) {
+      window.clearTimeout(state.pendingClickTimeoutId);
+      state.pendingClickTimeoutId = null;
+    }
+  };
+
+  const clickTargetNow = (target) => {
   const fireSyntheticClick = (target) => {
     ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((eventName) => {
       target.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
@@ -242,6 +274,36 @@
       return;
     }
 
+    if (!target.isConnected || !isElementVisible(target) || !isElementEnabled(target) || !isInsideAdUi(target)) {
+      debugLog('Skipped click because target became non-actionable before execution');
+      return;
+    }
+
+    state.lastClickTimestamp = now;
+    target.click();
+    console.log('AASFY clicked a skip control');
+    debugLog('Clicked target:', target.outerHTML?.slice(0, 220) || '<unknown>');
+
+    window.setTimeout(() => {
+      if (state.active && isAdLikelyShowing()) {
+        debugLog('Ad still showing after click; retrying target search');
+        attemptSkipAd();
+      }
+    }, 350);
+  };
+
+  const scheduleHumanLikeClick = (target) => {
+    if (state.pendingClickTimeoutId !== null) {
+      return;
+    }
+
+    const jitter = randomInt(HUMAN_DELAY_MS.min, HUMAN_DELAY_MS.max);
+    debugLog(`Scheduling click with humanized delay (${jitter}ms)`);
+
+    state.pendingClickTimeoutId = window.setTimeout(() => {
+      state.pendingClickTimeoutId = null;
+      clickTargetNow(target);
+    }, jitter);
     state.lastClickTimestamp = now;
     target.click();
     fireSyntheticClick(target);
@@ -570,11 +632,13 @@
     debugLog('Ad state:', adLikelyShowing ? 'likely-showing' : 'not-detected');
 
     if (!adLikelyShowing) {
+      clearPendingClick();
       return;
     }
 
     const target = findSkipTarget();
     if (target) {
+      scheduleHumanLikeClick(target);
       clickTarget(target);
     } else {
       debugLog('No skip target found in current cycle');
@@ -603,11 +667,14 @@
       state.observer.disconnect();
       state.observer = null;
     }
+
+    clearPendingClick();
   };
 
   const startMonitoring = () => {
     stopMonitoring();
 
+    state.intervalId = window.setInterval(attemptSkipAd, 1000);
     state.intervalId = window.setInterval(attemptSkipAd, 1200);
 
     state.observer = new MutationObserver(queueObserverAttempt);
@@ -615,6 +682,7 @@
       childList: true,
       subtree: true,
       attributes: true,
+      attributeFilter: ['class', 'aria-label', 'style', 'disabled']
       attributeFilter: ['class', 'aria-label', 'style']
     });
 
