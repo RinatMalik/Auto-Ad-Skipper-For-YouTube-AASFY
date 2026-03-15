@@ -322,6 +322,41 @@
         })
       );
     });
+
+    if (clickedAny) {
+      debugLog('Performed coordinate fallback clicks on target bounds');
+    }
+
+    return clickedAny;
+  };
+
+  // Fallback: sweep 100x100-ish points in the lower-right player area.
+  const tryLowerRightGridSweep = () => {
+    const moviePlayer = document.getElementById('movie_player');
+    const scopeRect = moviePlayer?.getBoundingClientRect?.() || {
+      left: 0,
+      top: 0,
+      width: window.innerWidth,
+      height: window.innerHeight
+    };
+
+    const right = scopeRect.left + scopeRect.width;
+    const bottom = scopeRect.top + scopeRect.height;
+    const leftLimit = Math.max(scopeRect.left, right - GRID_SWEEP_STEP_PX * 4);
+    const topLimit = Math.max(scopeRect.top, bottom - GRID_SWEEP_STEP_PX * 3);
+
+    let clickedAny = false;
+    for (let y = bottom - GRID_SWEEP_STEP_PX / 2; y >= topLimit; y -= GRID_SWEEP_STEP_PX) {
+      for (let x = right - GRID_SWEEP_STEP_PX / 2; x >= leftLimit; x -= GRID_SWEEP_STEP_PX) {
+        clickedAny = dispatchPointerSequenceAtPoint(x, y) || clickedAny;
+      }
+    }
+
+    if (clickedAny) {
+      debugLog('Performed lower-right grid sweep fallback');
+    }
+
+    return clickedAny;
   };
 
   function clampToViewport(x, y) {
@@ -439,7 +474,7 @@
       return;
     }
 
-    const delayMs = getHumanizedDelayMs();
+    const delayMs = isNativeSkipButton(target) || target?.closest?.('.ytp-ad-skip-button-container') ? 0 : getHumanizedDelayMs();
     state.pendingClickTimeoutId = window.setTimeout(() => {
       const queuedTarget = state.pendingClickTarget;
       state.pendingClickTimeoutId = null;
