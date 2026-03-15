@@ -7,7 +7,7 @@
 // 4) displays a build serial so you can verify the exact loaded code.
 (() => {
   // Build serial shown in popup to confirm the latest loaded extension build.
-  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-01';
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-02';
 
   // Fallback defaults used when storage is empty for first-time users.
   const DEFAULTS = {

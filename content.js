@@ -8,7 +8,7 @@
 // 5) retrying when YouTube delays enablement of the skip button.
 (() => {
   // Build serial to help confirm the loaded extension version in logs/UI.
-  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-01';
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-02';
 
   // Storage keys used across popup + content script.
   const STORAGE_KEYS = {
@@ -38,8 +38,10 @@
   const DEFAULT_TEXT_PATTERNS = ['skip', 'skip ad', 'skip ads', 'saltar', 'überspringen', 'ignorer', '跳过'];
 
   // Timing controls to avoid over-clicking and to support short retries.
-  const CLICK_DEBOUNCE_MS = 700;
-  const RETRY_AFTER_CLICK_MS = 350;
+  const CLICK_DEBOUNCE_MS = 1200;
+  const RETRY_AFTER_CLICK_MS = 650;
+  const HUMANIZED_CLICK_DELAY_MIN_MS = 120;
+  const HUMANIZED_CLICK_DELAY_MAX_MS = 260;
 
   // Runtime state cache.
   const state = {
@@ -49,6 +51,7 @@
     intervalId: null,
     observer: null,
     observerQueued: false,
+    pendingClickTimeoutId: null,
     lastClickTimestamp: 0
   };
 
@@ -91,21 +94,17 @@
     );
   };
 
-  // True only when an element appears actionable (not disabled/faded).
+  // True only when an element appears actionable (disabled states only).
   const isElementEnabled = (element) => {
     if (!(element instanceof HTMLElement)) {
       return false;
     }
 
-    const style = window.getComputedStyle(element);
     const isDisabledByAttr = element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true';
     const hasDisabledClass = (element.className || '').toString().toLowerCase().includes('disabled');
-    const opacity = Number.parseFloat(style.opacity || '1');
 
-    // YouTube renders the skip button early with reduced opacity before it is actionable.
-    const looksInteractable = Number.isNaN(opacity) ? true : opacity >= 0.95;
-
-    return !isDisabledByAttr && !hasDisabledClass && looksInteractable;
+    // We intentionally do not use opacity heuristics because hover states can change opacity.
+    return !isDisabledByAttr && !hasDisabledClass;
   };
 
   // Finds nearest clickable ancestor because text spans are often nested.
@@ -291,10 +290,32 @@
 
   // Uses pointer events in addition to .click() for better compatibility.
   const fireSyntheticClick = (target) => {
-    ['pointerdown', 'pointerup'].forEach((eventName) => {
-      const PointerCtor = window.PointerEvent || window.MouseEvent;
-      target.dispatchEvent(new PointerCtor(eventName, { bubbles: true, cancelable: true, view: window }));
+    // Emit both pointer + mouse phases because some handlers are bound to one family only.
+    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((eventName) => {
+      const EventCtor = eventName.startsWith('pointer') ? (window.PointerEvent || window.MouseEvent) : window.MouseEvent;
+      target.dispatchEvent(new EventCtor(eventName, { bubbles: true, cancelable: true, view: window }));
     });
+  };
+
+  // Returns a small randomized delay to make click timing less robotic.
+  const getHumanizedDelayMs = () => {
+    const span = Math.max(0, HUMANIZED_CLICK_DELAY_MAX_MS - HUMANIZED_CLICK_DELAY_MIN_MS);
+    return HUMANIZED_CLICK_DELAY_MIN_MS + Math.floor(Math.random() * (span + 1));
+  };
+
+  // Schedules one click attempt after a short human-like delay.
+  const queueClickTarget = (target) => {
+    if (state.pendingClickTimeoutId !== null) {
+      return;
+    }
+
+    const delayMs = getHumanizedDelayMs();
+    state.pendingClickTimeoutId = window.setTimeout(() => {
+      state.pendingClickTimeoutId = null;
+      clickTarget(target);
+    }, delayMs);
+
+    debugLog('Scheduled click attempt with humanized delay (ms):', delayMs);
   };
 
   // Invokes YouTube player API fallback when UI click path is blocked.
@@ -374,7 +395,7 @@
     const target = findSkipTarget();
     if (target) {
       debugLog('Skip target detected; attempting click');
-      clickTarget(target);
+      queueClickTarget(target);
     } else {
       debugLog('No skip target found in current cycle');
       if (tryPlayerApiSkip()) {
@@ -401,6 +422,11 @@
     if (state.intervalId !== null) {
       clearInterval(state.intervalId);
       state.intervalId = null;
+    }
+
+    if (state.pendingClickTimeoutId !== null) {
+      clearTimeout(state.pendingClickTimeoutId);
+      state.pendingClickTimeoutId = null;
     }
 
     if (state.observer) {
