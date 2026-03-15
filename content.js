@@ -8,7 +8,7 @@
 // 5) retrying when YouTube delays enablement of the skip button.
 (() => {
   // Build serial to help confirm the loaded extension version in logs/UI.
-  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-02';
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-03';
 
   // Storage keys used across popup + content script.
   const STORAGE_KEYS = {
@@ -34,6 +34,8 @@
     'button[aria-label*="Skip" i]'
   ];
 
+  const AD_UI_CONTAINERS = ['#movie_player.ad-showing', '.video-ads.ytp-ad-module', '.ytp-ad-player-overlay', '.ytp-ad-module'];
+
   // Multi-language keywords and common phrases used in skip controls.
   const DEFAULT_TEXT_PATTERNS = ['skip', 'skip ad', 'skip ads', 'saltar', 'überspringen', 'ignorer', '跳过'];
 
@@ -52,6 +54,7 @@
     observer: null,
     observerQueued: false,
     pendingClickTimeoutId: null,
+    pendingClickTarget: null,
     lastClickTimestamp: 0
   };
 
@@ -126,6 +129,16 @@
     }
   };
 
+  // Skip controls should count only when they are in known ad UI containers.
+  const isSelectorVisibleInAdUi = (selector) => {
+    try {
+      return [...document.querySelectorAll(selector)].some((element) => isElementVisible(element) && isInsideAdUi(element));
+    } catch (error) {
+      debugLog('Ad-UI selector visibility check failed:', selector, error?.message || error);
+      return false;
+    }
+  };
+
   // Reads multiple ad-related UI indicators to reduce false positives.
   const getAdSignals = () => {
     const moviePlayerAdShowing = Boolean(document.querySelector('#movie_player.ad-showing'));
@@ -133,7 +146,8 @@
     const adOverlayVisible = isSelectorVisible('.ytp-ad-player-overlay');
     const adPreviewVisible = isSelectorVisible('.ytp-ad-preview-container');
     const adBadgeVisible = isSelectorVisible('.ytp-ad-text, .ytp-ad-simple-ad-badge');
-    const skipControlVisible = DEFAULT_SELECTORS.some((selector) => isSelectorVisible(selector));
+    const skipControlVisible = DEFAULT_SELECTORS.some((selector) => isSelectorVisibleInAdUi(selector));
+    const adContainerVisible = AD_UI_CONTAINERS.some((selector) => isSelectorVisible(selector));
 
     return {
       moviePlayerAdShowing,
@@ -141,7 +155,8 @@
       adOverlayVisible,
       adPreviewVisible,
       adBadgeVisible,
-      skipControlVisible
+      skipControlVisible,
+      adContainerVisible
     };
   };
 
@@ -154,7 +169,7 @@
         signals.adOverlayVisible ||
         signals.adPreviewVisible ||
         signals.adBadgeVisible ||
-        signals.skipControlVisible
+        (signals.skipControlVisible && signals.adContainerVisible)
     );
   };
 
@@ -303,19 +318,38 @@
     return HUMANIZED_CLICK_DELAY_MIN_MS + Math.floor(Math.random() * (span + 1));
   };
 
+  const isNativeSkipButton = (target) => {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    const classText = (target.className || '').toString().toLowerCase();
+    const idText = (target.id || '').toString().toLowerCase();
+    return (
+      classText.includes('ytp-ad-skip-button') ||
+      classText.includes('ytp-skip-ad-button') ||
+      idText.startsWith('skip-button:')
+    );
+  };
+
   // Schedules one click attempt after a short human-like delay.
   const queueClickTarget = (target) => {
+    state.pendingClickTarget = target;
+
     if (state.pendingClickTimeoutId !== null) {
+      debugLog('Updated queued skip target while timer already pending');
       return;
     }
 
-    const delayMs = getHumanizedDelayMs();
+    const delayMs = isNativeSkipButton(target) ? 0 : getHumanizedDelayMs();
     state.pendingClickTimeoutId = window.setTimeout(() => {
+      const queuedTarget = state.pendingClickTarget;
       state.pendingClickTimeoutId = null;
-      clickTarget(target);
+      state.pendingClickTarget = null;
+      clickTarget(queuedTarget, { bypassDebounce: delayMs === 0 });
     }, delayMs);
 
-    debugLog('Scheduled click attempt with humanized delay (ms):', delayMs);
+    debugLog('Scheduled click attempt with delay (ms):', delayMs);
   };
 
   // Invokes YouTube player API fallback when UI click path is blocked.
@@ -343,10 +377,19 @@
   };
 
   // Performs a guarded click flow with debounce + eligibility checks.
-  const clickTarget = (target) => {
+  const clickTarget = (target, options = {}) => {
+    const { bypassDebounce = false } = options;
     const now = Date.now();
-    if (now - state.lastClickTimestamp < CLICK_DEBOUNCE_MS) {
-      debugLog('Skipped click due to debounce window');
+    if (!bypassDebounce && now - state.lastClickTimestamp < CLICK_DEBOUNCE_MS) {
+      debugLog('Skipped click due to debounce window', {
+        sinceLastMs: now - state.lastClickTimestamp,
+        debounceMs: CLICK_DEBOUNCE_MS
+      });
+      return;
+    }
+
+    if (!target) {
+      debugLog('Skipped click because no target was queued');
       return;
     }
 
@@ -372,6 +415,9 @@
     window.setTimeout(() => {
       if (state.active && isAdLikelyShowing()) {
         debugLog('Ad still showing after click; retrying target search');
+        if (tryPlayerApiSkip()) {
+          console.log('AASFY invoked player API skip fallback after click retry');
+        }
         attemptSkipAd();
       }
     }, RETRY_AFTER_CLICK_MS);
@@ -395,6 +441,13 @@
     const target = findSkipTarget();
     if (target) {
       debugLog('Skip target detected; attempting click');
+
+      // Some YouTube variants ignore synthetic clicks unless a trusted gesture exists.
+      // Invoke known player APIs in parallel when available.
+      if (tryPlayerApiSkip()) {
+        console.log('AASFY invoked player API skip fallback before UI click');
+      }
+
       queueClickTarget(target);
     } else {
       debugLog('No skip target found in current cycle');
@@ -428,6 +481,8 @@
       clearTimeout(state.pendingClickTimeoutId);
       state.pendingClickTimeoutId = null;
     }
+
+    state.pendingClickTarget = null;
 
     if (state.observer) {
       state.observer.disconnect();
