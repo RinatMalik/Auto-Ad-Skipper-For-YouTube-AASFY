@@ -88,11 +88,6 @@
     return !isDisabledByAttr && !hasDisabledClass && looksInteractable;
   };
 
-  const isSelectorVisible = (selector) => {
-    const element = document.querySelector(selector);
-    return Boolean(element && isElementVisible(element));
-  };
-
   const getClickableElement = (element) => {
     if (!(element instanceof HTMLElement)) {
       return null;
@@ -123,9 +118,10 @@
 
     // Use strong positive signals first; avoid false positives from generic overlays alone.
     return Boolean(
-      signals.moviePlayerAdShowing ||
-        signals.adModuleVisible ||
-        (signals.skipControlVisible && (signals.adOverlayVisible || signals.adPreviewVisible || signals.adBadgeVisible))
+      document.querySelector('.ad-showing') ||
+        document.querySelector('.video-ads.ytp-ad-module') ||
+        document.querySelector('.ytp-ad-player-overlay') ||
+        document.querySelector('.ytp-ad-preview-container')
     );
   };
 
@@ -259,23 +255,6 @@
       const PointerCtor = window.PointerEvent || window.MouseEvent;
       target.dispatchEvent(new PointerCtor(eventName, { bubbles: true, cancelable: true, view: window }));
     });
-
-    ['mousedown', 'mouseup', 'click'].forEach((eventName) => {
-      target.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
-    });
-  };
-
-  const isTargetTopMost = (target) => {
-    if (!(target instanceof HTMLElement)) {
-      return false;
-    }
-
-    const rect = target.getBoundingClientRect();
-    const probeX = rect.left + rect.width / 2;
-    const probeY = rect.top + rect.height / 2;
-    const topElement = document.elementFromPoint(probeX, probeY);
-
-    return Boolean(topElement && (topElement === target || target.contains(topElement) || topElement.contains(target)));
   };
 
   const clickTarget = (target) => {
@@ -287,11 +266,6 @@
 
     if (!target.isConnected || !isElementVisible(target) || !isInsideAdUi(target)) {
       debugLog('Skipped click because target became non-actionable before execution');
-      return;
-    }
-
-    if (!isTargetTopMost(target)) {
-      debugLog('Skipped click because skip target is covered by another element');
       return;
     }
 
