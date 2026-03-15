@@ -8,7 +8,7 @@
 // 5) retrying when YouTube delays enablement of the skip button.
 (() => {
   // Build serial to help confirm the loaded extension version in logs/UI.
-  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-06';
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-07';
 
   // Storage keys used across popup + content script.
   const STORAGE_KEYS = {
@@ -322,57 +322,6 @@
         })
       );
     });
-  };
-
-  const clampToViewport = (x, y) => {
-    const maxX = Math.max(0, window.innerWidth - 1);
-    const maxY = Math.max(0, window.innerHeight - 1);
-    return {
-      x: Math.min(maxX, Math.max(0, Math.round(x))),
-      y: Math.min(maxY, Math.max(0, Math.round(y)))
-    };
-  };
-
-  const dispatchPointerSequenceAtPoint = (x, y) => {
-    const { x: cx, y: cy } = clampToViewport(x, y);
-    const elementAtPoint = document.elementFromPoint(cx, cy);
-    if (!(elementAtPoint instanceof HTMLElement)) {
-      return false;
-    }
-
-    const clickable = getClickableElement(elementAtPoint);
-    if (!(clickable instanceof HTMLElement)) {
-      return false;
-    }
-
-    fireSyntheticClick(clickable, { x: cx, y: cy });
-    clickable.click();
-    return true;
-  };
-
-  // Fallback: try point-based clicks across the target rect (helps when wrappers intercept events).
-  const tryCoordinateClickOnTarget = (target) => {
-    if (!(target instanceof HTMLElement)) {
-      return false;
-    }
-
-    const rect = target.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
-      return false;
-    }
-
-    const points = [
-      { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
-      { x: rect.left + rect.width * 0.25, y: rect.top + rect.height * 0.3 },
-      { x: rect.left + rect.width * 0.75, y: rect.top + rect.height * 0.3 },
-      { x: rect.left + rect.width * 0.25, y: rect.top + rect.height * 0.7 },
-      { x: rect.left + rect.width * 0.75, y: rect.top + rect.height * 0.7 }
-    ];
-
-    let clickedAny = false;
-    points.forEach((point) => {
-      clickedAny = dispatchPointerSequenceAtPoint(point.x, point.y) || clickedAny;
-    });
 
     if (clickedAny) {
       debugLog('Performed coordinate fallback clicks on target bounds');
@@ -410,14 +359,14 @@
     return clickedAny;
   };
 
-  const clampToViewport = (x, y) => {
+  function clampToViewport(x, y) {
     const maxX = Math.max(0, window.innerWidth - 1);
     const maxY = Math.max(0, window.innerHeight - 1);
     return {
       x: Math.min(maxX, Math.max(0, Math.round(x))),
       y: Math.min(maxY, Math.max(0, Math.round(y)))
     };
-  };
+  }
 
   const dispatchPointerSequenceAtPoint = (x, y) => {
     const { x: cx, y: cy } = clampToViewport(x, y);
