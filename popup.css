@@ -1,4 +1,10 @@
 /* popup.css */
+/*
+ * Visual styles for the extension popup.
+ * Sections are grouped by layout container, typography, controls, and list rows.
+ */
+
+/* Base popup layout and card-like container styling. */
 body {
   font-family: Arial, sans-serif;
   background-color: #f0f0f0;
@@ -8,22 +14,26 @@ body {
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
+/* Main title styling. */
 h2 {
   color: #222;
   margin: 0 0 10px;
 }
 
+/* Section title styling (used for custom identifier section). */
 h3 {
   margin: 0 0 8px;
   color: #2f2f2f;
 }
 
+/* Body copy style shared by paragraph tags. */
 p {
   color: #555;
   line-height: 1.4;
   margin: 0 0 12px;
 }
 
+/* Horizontal row for status pill + activate/deactivate button. */
 .row {
   display: flex;
   align-items: center;
@@ -32,6 +42,7 @@ p {
   margin-bottom: 12px;
 }
 
+/* Neutral status pill base style. */
 .pill {
   border-radius: 999px;
   padding: 6px 10px;
@@ -41,16 +52,19 @@ p {
   color: #333;
 }
 
+/* Active-state pill color theme. */
 .pill.active {
   background: #dcfce7;
   color: #166534;
 }
 
+/* Inactive-state pill color theme. */
 .pill.inactive {
   background: #fee2e2;
   color: #991b1b;
 }
 
+/* Shared primary button style. */
 button {
   background-color: #4caf50;
   color: #fff;
@@ -61,10 +75,12 @@ button {
   font-size: 14px;
 }
 
+/* Shared button hover state. */
 button:hover {
   background-color: #45a049;
 }
 
+/* Debug checkbox row. */
 .debug-toggle {
   display: flex;
   align-items: center;
@@ -74,6 +90,7 @@ button:hover {
   color: #333;
 }
 
+/* Wrapper card for custom identifier controls/list. */
 .custom-identifiers {
   background: #fff;
   border: 1px solid #e4e4e7;
@@ -81,17 +98,20 @@ button:hover {
   padding: 12px;
 }
 
+/* Helper text under identifier section title. */
 .help-text {
   font-size: 12px;
   color: #666;
   margin-bottom: 8px;
 }
 
+/* Row containing text input + add button. */
 .input-row {
   display: flex;
   gap: 8px;
 }
 
+/* Text input for entering selector/text identifiers. */
 input[type='text'] {
   flex: 1;
   padding: 8px;
@@ -99,6 +119,7 @@ input[type='text'] {
   border-radius: 4px;
 }
 
+/* Scrollable list container for saved identifiers. */
 #identifierList {
   list-style: none;
   margin: 10px 0 0;
@@ -107,6 +128,7 @@ input[type='text'] {
   overflow-y: auto;
 }
 
+/* Per-identifier row layout. */
 #identifierList li {
   display: flex;
   align-items: center;
@@ -116,21 +138,34 @@ input[type='text'] {
   border-bottom: 1px solid #f0f0f0;
 }
 
+/* Removes divider on final list row for cleaner finish. */
 #identifierList li:last-child {
   border-bottom: none;
 }
 
+/* Empty list placeholder style. */
 #identifierList li.empty {
   color: #777;
   font-size: 13px;
 }
 
+/* Remove-button styling (overrides shared button colors). */
 button.remove {
   background: #ef4444;
   padding: 5px 9px;
   font-size: 12px;
 }
 
+/* Remove-button hover styling. */
 button.remove:hover {
   background: #dc2626;
+}
+
+/* Build serial label shown at the bottom for version verification. */
+.build-serial {
+  margin-top: 12px;
+  margin-bottom: 0;
+  font-size: 12px;
+  color: #555;
+  text-align: right;
 }

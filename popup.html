@@ -1,39 +1,54 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <!-- Character set + viewport for proper rendering in extension popup window. -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Auto Ad Skipper for YouTube (AASFY)</title>
+
+  <!-- Popup styles. -->
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
+  <!-- Popup heading + short purpose description. -->
   <h2>Auto Ad Skipper For YouTube (AASFY)</h2>
   <p>
     This extension watches for YouTube ad skip controls and clicks them when available.
   </p>
 
+  <!-- Activation status row with state pill and toggle button. -->
   <div class="row">
     <span id="statusPill" class="pill">Status: Loading...</span>
     <button id="activateButton">Activate</button>
   </div>
 
+  <!-- Debug mode toggle used to enable verbose console logs. -->
   <label class="debug-toggle">
     <input type="checkbox" id="debugToggle">
     Enable debug mode
   </label>
 
+  <!-- Custom selector/text configuration section for evolving YouTube UIs. -->
   <section class="custom-identifiers">
     <h3>Custom selector / identifier</h3>
     <p class="help-text">
       Add a CSS selector (for example <code>.my-new-skip-button</code>) or text hint (for example <code>skip now</code>).
     </p>
+
+    <!-- Input row for adding a new custom identifier. -->
     <div class="input-row">
       <input id="customIdentifierInput" type="text" placeholder="Enter selector or text hint">
       <button id="addIdentifierButton" type="button">Add</button>
     </div>
+
+    <!-- Existing custom identifiers render here. -->
     <ul id="identifierList"></ul>
   </section>
 
+  <!-- Build serial helps confirm the currently loaded extension build. -->
+  <p id="buildSerialLabel" class="build-serial">Build serial: loading...</p>
+
+  <!-- Popup behavior script. -->
   <script src="popup.js"></script>
 </body>
 </html>
