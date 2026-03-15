@@ -8,7 +8,7 @@
 // 5) retrying when YouTube delays enablement of the skip button.
 (() => {
   // Build serial to help confirm the loaded extension version in logs/UI.
-  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-02';
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-03';
 
   // Storage keys used across popup + content script.
   const STORAGE_KEYS = {
@@ -54,6 +54,7 @@
     observer: null,
     observerQueued: false,
     pendingClickTimeoutId: null,
+    pendingClickTarget: null,
     lastClickTimestamp: 0
   };
 
@@ -317,19 +318,38 @@
     return HUMANIZED_CLICK_DELAY_MIN_MS + Math.floor(Math.random() * (span + 1));
   };
 
+  const isNativeSkipButton = (target) => {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    const classText = (target.className || '').toString().toLowerCase();
+    const idText = (target.id || '').toString().toLowerCase();
+    return (
+      classText.includes('ytp-ad-skip-button') ||
+      classText.includes('ytp-skip-ad-button') ||
+      idText.startsWith('skip-button:')
+    );
+  };
+
   // Schedules one click attempt after a short human-like delay.
   const queueClickTarget = (target) => {
+    state.pendingClickTarget = target;
+
     if (state.pendingClickTimeoutId !== null) {
+      debugLog('Updated queued skip target while timer already pending');
       return;
     }
 
-    const delayMs = getHumanizedDelayMs();
+    const delayMs = isNativeSkipButton(target) ? 0 : getHumanizedDelayMs();
     state.pendingClickTimeoutId = window.setTimeout(() => {
+      const queuedTarget = state.pendingClickTarget;
       state.pendingClickTimeoutId = null;
-      clickTarget(target);
+      state.pendingClickTarget = null;
+      clickTarget(queuedTarget, { bypassDebounce: delayMs === 0 });
     }, delayMs);
 
-    debugLog('Scheduled click attempt with humanized delay (ms):', delayMs);
+    debugLog('Scheduled click attempt with delay (ms):', delayMs);
   };
 
   // Invokes YouTube player API fallback when UI click path is blocked.
@@ -357,10 +377,19 @@
   };
 
   // Performs a guarded click flow with debounce + eligibility checks.
-  const clickTarget = (target) => {
+  const clickTarget = (target, options = {}) => {
+    const { bypassDebounce = false } = options;
     const now = Date.now();
-    if (now - state.lastClickTimestamp < CLICK_DEBOUNCE_MS) {
-      debugLog('Skipped click due to debounce window');
+    if (!bypassDebounce && now - state.lastClickTimestamp < CLICK_DEBOUNCE_MS) {
+      debugLog('Skipped click due to debounce window', {
+        sinceLastMs: now - state.lastClickTimestamp,
+        debounceMs: CLICK_DEBOUNCE_MS
+      });
+      return;
+    }
+
+    if (!target) {
+      debugLog('Skipped click because no target was queued');
       return;
     }
 
@@ -452,6 +481,8 @@
       clearTimeout(state.pendingClickTimeoutId);
       state.pendingClickTimeoutId = null;
     }
+
+    state.pendingClickTarget = null;
 
     if (state.observer) {
       state.observer.disconnect();
