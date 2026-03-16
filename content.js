@@ -8,7 +8,7 @@
 // 5) retrying when YouTube delays enablement of the skip button.
 (() => {
   // Build serial to help confirm the loaded extension version in logs/UI.
-  const BUILD_SERIAL = 'AASFY-PR-2026-03-16-10';
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-16-11';
 
   // Storage keys used across popup + content script.
   const STORAGE_KEYS = {
@@ -103,6 +103,7 @@
     return (
       style.display !== 'none' &&
       style.visibility !== 'hidden' &&
+      style.opacity !== '0' &&
       (isButton || style.pointerEvents !== 'none') &&
       rect.width > 0 &&
       rect.height > 0
@@ -175,16 +176,23 @@
   };
 
   // Final ad-likelihood decision used to gate skip attempts.
+  // #movie_player.ad-showing is the authoritative signal — YouTube adds this
+  // class when an ad starts and removes it when the ad truly ends. The other
+  // DOM elements (ytd-ad-slot-renderer, .video-ads, etc.) frequently linger
+  // in the page after the ad finishes, so they must NOT be trusted alone.
   const isAdLikelyShowing = (signals = getAdSignals()) => {
-    return Boolean(
-      signals.moviePlayerAdShowing ||
-        signals.adModuleVisible ||
-        signals.adOverlayVisible ||
-        signals.adPreviewVisible ||
-        signals.adBadgeVisible ||
-        signals.adSlotVisible ||
-        (signals.skipControlVisible && signals.adContainerVisible)
-    );
+    // Primary: YouTube's own ad-showing class on the player element.
+    if (signals.moviePlayerAdShowing) {
+      return true;
+    }
+
+    // Secondary: a visible skip control inside an ad container is a strong
+    // indicator even without .ad-showing (covers brief transition states).
+    if (signals.skipControlVisible && signals.adContainerVisible) {
+      return true;
+    }
+
+    return false;
   };
 
   // Ensures candidate controls are part of known ad-related UI zones.
@@ -464,7 +472,7 @@
       }
     }
 
-    return false;
+    
   };
 
   // Performs a guarded click flow with debounce + eligibility checks.
