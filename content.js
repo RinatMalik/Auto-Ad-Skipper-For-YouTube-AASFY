@@ -8,7 +8,7 @@
 // 5) retrying when YouTube delays enablement of the skip button.
 (() => {
   // Build serial to help confirm the loaded extension version in logs/UI.
-  const BUILD_SERIAL = 'AASFY-PR-2026-03-16-11';
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-16-12';
 
   // Storage keys used across popup + content script.
   const STORAGE_KEYS = {
@@ -567,37 +567,42 @@
       return;
     }
 
+    // When already fast-forwarding, only do the minimum: check if the ad
+    // ended and re-apply playback rate. Skip the expensive button search,
+    // candidate ranking, and click attempts — they generate heavy log
+    // traffic and accomplish nothing while the ad plays through at 16x.
+    if (state.adFastForwarding) {
+      if (!isAdLikelyShowing()) {
+        restorePlayback();
+        console.log(`[AASFY ${BUILD_SERIAL}] Ad ended; restored playback`);
+      } else {
+        fastForwardAd();
+      }
+      return;
+    }
+
     const adSignals = getAdSignals();
     const adLikelyShowing = isAdLikelyShowing(adSignals);
     debugLog('Ad state:', adLikelyShowing ? 'likely-showing' : 'not-detected');
     debugLog('Ad signals:', adSignals);
 
     if (!adLikelyShowing) {
-      // Ad finished — restore the user's playback settings.
-      if (state.adFastForwarding) {
-        restorePlayback();
-        console.log(`[AASFY ${BUILD_SERIAL}] Ad ended; restored playback`);
-      }
       return;
     }
 
-    // Strategy 1: mute + 16x playback speed so the ad finishes in ~2s.
-    // Re-applied every cycle in case YouTube's player resets it.
+    // First ad detection — start fast-forwarding immediately.
+    console.log(`[AASFY ${BUILD_SERIAL}] Ad detected; muting + fast-forwarding at 16x`);
     fastForwardAd();
 
-    // Strategy 2: player API methods visible from content-script world.
+    // Also try other skip strategies on first detection.
     if (tryPlayerApiSkip()) {
       console.log(`[AASFY ${BUILD_SERIAL}] Ad skip via player API`);
     }
 
-    // Strategy 3: find and click the skip button (still tried in case
-    // YouTube changes their isTrusted policy in the future).
     const target = findSkipTarget();
     if (target) {
       debugLog('Skip target detected; queuing click');
       queueClickTarget(target);
-    } else {
-      debugLog('No skip target found in current cycle');
     }
   };
 
