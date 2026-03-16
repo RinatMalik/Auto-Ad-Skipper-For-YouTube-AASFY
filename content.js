@@ -8,7 +8,7 @@
 // 5) retrying when YouTube delays enablement of the skip button.
 (() => {
   // Build serial to help confirm the loaded extension version in logs/UI.
-  const BUILD_SERIAL = 'AASFY-PR-2026-03-16-12';
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-16-13';
 
   // Storage keys used across popup + content script.
   const STORAGE_KEYS = {
@@ -58,6 +58,8 @@
     intervalId: null,
     observer: null,
     observerQueued: false,
+    lastObserverRunTimestamp: 0,
+    lastDebugAdState: null,
     pendingClickTimeoutId: null,
     pendingClickTarget: null,
     lastClickTimestamp: 0,
@@ -583,8 +585,14 @@
 
     const adSignals = getAdSignals();
     const adLikelyShowing = isAdLikelyShowing(adSignals);
-    debugLog('Ad state:', adLikelyShowing ? 'likely-showing' : 'not-detected');
-    debugLog('Ad signals:', adSignals);
+
+    // Only log ad state when it changes to avoid flooding the console.
+    const adStateLabel = adLikelyShowing ? 'likely-showing' : 'not-detected';
+    if (adStateLabel !== state.lastDebugAdState) {
+      debugLog('Ad state:', adStateLabel);
+      debugLog('Ad signals:', adSignals);
+      state.lastDebugAdState = adStateLabel;
+    }
 
     if (!adLikelyShowing) {
       return;
@@ -606,15 +614,26 @@
     }
   };
 
-  // Coalesces frequent mutation bursts into one animation-frame attempt.
+  // Throttles observer-triggered attempts to at most once per 2 seconds.
+  // The polling interval already runs every 1 second; the observer only
+  // needs to catch sudden ad-state transitions between intervals.
+  const OBSERVER_THROTTLE_MS = 2000;
+
   const queueObserverAttempt = () => {
     if (state.observerQueued) {
+      return;
+    }
+
+    const now = Date.now();
+    const elapsed = now - state.lastObserverRunTimestamp;
+    if (elapsed < OBSERVER_THROTTLE_MS) {
       return;
     }
 
     state.observerQueued = true;
     window.requestAnimationFrame(() => {
       state.observerQueued = false;
+      state.lastObserverRunTimestamp = Date.now();
       attemptSkipAd();
     });
   };
