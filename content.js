@@ -8,7 +8,7 @@
 // 5) retrying when YouTube delays enablement of the skip button.
 (() => {
   // Build serial to help confirm the loaded extension version in logs/UI.
-  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-08';
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-09';
 
   // Storage keys used across popup + content script.
   const STORAGE_KEYS = {
@@ -383,6 +383,69 @@
     debugLog('Scheduled click attempt with delay (ms):', delayMs);
   };
 
+  // Skips the current ad by advancing the video element to its end.
+  // YouTube's skip button uses isTrusted checks that block all synthetic
+  // click events from content scripts. Setting currentTime directly on
+  // the HTMLVideoElement bypasses those checks entirely — the browser
+  // fires a natural 'ended' event which YouTube's player handles the
+  // same way a real skip does.
+  const skipAdViaVideoEnd = () => {
+    const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+    if (!(video instanceof HTMLVideoElement)) {
+      return false;
+    }
+
+    const duration = video.duration;
+    if (!isFinite(duration) || duration <= 0) {
+      return false;
+    }
+
+    if (video.currentTime >= duration - 0.1) {
+      return false;
+    }
+
+    try {
+      video.currentTime = duration;
+      debugLog('Set video.currentTime to end of ad', duration);
+      return true;
+    } catch (err) {
+      debugLog('video.currentTime assignment failed:', err?.message || err);
+      return false;
+    }
+  };
+
+  // Injects a one-shot script into the page's main JS execution context.
+  // Content scripts run in an isolated world and cannot access window.yt or
+  // other page-level globals. A <script> tag runs in the main world and can
+  // reach internal YouTube player APIs that are invisible from the extension.
+  const tryMainWorldSkip = () => {
+    try {
+      const script = document.createElement('script');
+      script.textContent = `(function () {
+        var player = document.getElementById('movie_player');
+        if (!player) return;
+        ['skipAd', 'skipVideo', 'onSkipAd'].forEach(function (m) {
+          if (typeof player[m] === 'function') { try { player[m](); } catch (e) {} }
+        });
+        if (window.yt && window.yt.player) {
+          var fn = window.yt.player.getPlayerByElement;
+          var p = typeof fn === 'function' ? fn(player) : null;
+          if (p) { ['skipAd', 'skipVideo', 'onSkipAd'].forEach(function (m) {
+            if (typeof p[m] === 'function') { try { p[m](); } catch (e) {} }
+          }); }
+        }
+        var video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+        if (video && isFinite(video.duration) && video.duration > 0 && video.currentTime < video.duration - 0.1) {
+          try { video.currentTime = video.duration; } catch (e) {}
+        }
+      })();`;
+      (document.head || document.documentElement).appendChild(script);
+      script.remove();
+    } catch (err) {
+      debugLog('Main world script injection failed:', err?.message || err);
+    }
+  };
+
   // Invokes YouTube player API fallback when UI click path is blocked.
   const tryPlayerApiSkip = () => {
     const moviePlayer = document.getElementById('movie_player');
@@ -475,6 +538,8 @@
       debugLog('Ad still showing after click; retrying');
 
       try {
+        skipAdViaVideoEnd();
+        tryMainWorldSkip();
         tryPlayerApiSkip();
 
         if (target.isConnected && isElementVisible(target)) {
@@ -491,7 +556,7 @@
     }, RETRY_AFTER_CLICK_MS);
   };
 
-  // Single pass: detect ad state, then find and click skip if possible.
+  // Single pass: detect ad state, then attempt all skip strategies.
   const attemptSkipAd = () => {
     if (!state.active) {
       return;
@@ -506,15 +571,27 @@
       return;
     }
 
+    // Strategy 1: force video to end — bypasses isTrusted checks entirely.
+    if (skipAdViaVideoEnd()) {
+      console.log(`[AASFY ${BUILD_SERIAL}] Ad skip via video end`);
+    }
+
+    // Strategy 2: main-world injection to reach window.yt APIs.
+    tryMainWorldSkip();
+
+    // Strategy 3: player API methods visible from content-script world.
+    if (tryPlayerApiSkip()) {
+      console.log(`[AASFY ${BUILD_SERIAL}] Ad skip via player API`);
+    }
+
+    // Strategy 4: find and click the skip button (fallback for cases
+    // where strategies 1-3 are blocked or unavailable).
     const target = findSkipTarget();
     if (target) {
-      debugLog('Skip target detected; attempting click');
+      debugLog('Skip target detected; queuing click');
       queueClickTarget(target);
     } else {
-      debugLog('No skip target found; trying player API');
-      if (tryPlayerApiSkip()) {
-        console.log('AASFY invoked player API skip (no UI target found)');
-      }
+      debugLog('No skip target found in current cycle');
     }
   };
 
