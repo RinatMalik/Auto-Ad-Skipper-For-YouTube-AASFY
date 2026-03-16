@@ -443,34 +443,6 @@
     state.preAdMuted = null;
   };
 
-  // Injects a one-shot script into the page's main JS execution context.
-  // Content scripts run in an isolated world and cannot access window.yt or
-  // other page-level globals. A <script> tag runs in the main world and can
-  // reach internal YouTube player APIs that are invisible from the extension.
-  const tryMainWorldSkip = () => {
-    try {
-      const script = document.createElement('script');
-      script.textContent = `(function () {
-        var player = document.getElementById('movie_player');
-        if (!player) return;
-        ['skipAd', 'skipVideo', 'onSkipAd'].forEach(function (m) {
-          if (typeof player[m] === 'function') { try { player[m](); } catch (e) {} }
-        });
-        if (window.yt && window.yt.player) {
-          var fn = window.yt.player.getPlayerByElement;
-          var p = typeof fn === 'function' ? fn(player) : null;
-          if (p) { ['skipAd', 'skipVideo', 'onSkipAd'].forEach(function (m) {
-            if (typeof p[m] === 'function') { try { p[m](); } catch (e) {} }
-          }); }
-        }
-      })();`;
-      (document.head || document.documentElement).appendChild(script);
-      script.remove();
-    } catch (err) {
-      debugLog('Main world script injection failed:', err?.message || err);
-    }
-  };
-
   // Invokes YouTube player API fallback when UI click path is blocked.
   const tryPlayerApiSkip = () => {
     const moviePlayer = document.getElementById('movie_player');
@@ -564,7 +536,7 @@
 
       try {
         fastForwardAd();
-        tryMainWorldSkip();
+
         tryPlayerApiSkip();
 
         if (target.isConnected && isElementVisible(target)) {
@@ -605,15 +577,12 @@
     // Re-applied every cycle in case YouTube's player resets it.
     fastForwardAd();
 
-    // Strategy 2: main-world injection to reach window.yt internal APIs.
-    tryMainWorldSkip();
-
-    // Strategy 3: player API methods visible from content-script world.
+    // Strategy 2: player API methods visible from content-script world.
     if (tryPlayerApiSkip()) {
       console.log(`[AASFY ${BUILD_SERIAL}] Ad skip via player API`);
     }
 
-    // Strategy 4: find and click the skip button (still tried in case
+    // Strategy 3: find and click the skip button (still tried in case
     // YouTube changes their isTrusted policy in the future).
     const target = findSkipTarget();
     if (target) {
