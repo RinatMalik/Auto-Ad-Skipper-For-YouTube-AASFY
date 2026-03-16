@@ -8,7 +8,7 @@
 // 5) retrying when YouTube delays enablement of the skip button.
 (() => {
   // Build serial to help confirm the loaded extension version in logs/UI.
-  const BUILD_SERIAL = 'AASFY-PR-2026-03-15-09';
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-16-10';
 
   // Storage keys used across popup + content script.
   const STORAGE_KEYS = {
@@ -60,7 +60,10 @@
     observerQueued: false,
     pendingClickTimeoutId: null,
     pendingClickTarget: null,
-    lastClickTimestamp: 0
+    lastClickTimestamp: 0,
+    adFastForwarding: false,
+    preAdPlaybackRate: null,
+    preAdMuted: null
   };
 
   // Debug logger (active only when debugMode is enabled from popup).
@@ -383,35 +386,61 @@
     debugLog('Scheduled click attempt with delay (ms):', delayMs);
   };
 
-  // Skips the current ad by advancing the video element to its end.
-  // YouTube's skip button uses isTrusted checks that block all synthetic
-  // click events from content scripts. Setting currentTime directly on
-  // the HTMLVideoElement bypasses those checks entirely — the browser
-  // fires a natural 'ended' event which YouTube's player handles the
-  // same way a real skip does.
-  const skipAdViaVideoEnd = () => {
+  // Mutes the video and sets playback rate to 16x during an ad so the ad
+  // finishes in ~2 seconds silently. YouTube checks event.isTrusted on the
+  // skip button — no programmatic click from a content script can ever pass
+  // that check. This approach sidesteps it entirely: the ad plays to
+  // natural completion, just 16x faster and with no audio.
+  // Re-applied on every cycle in case YouTube's player resets playbackRate.
+  const fastForwardAd = () => {
     const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
     if (!(video instanceof HTMLVideoElement)) {
       return false;
     }
 
-    const duration = video.duration;
-    if (!isFinite(duration) || duration <= 0) {
-      return false;
+    // Save the user's original settings on the first call for this ad.
+    if (!state.adFastForwarding) {
+      state.preAdPlaybackRate = video.playbackRate;
+      state.preAdMuted = video.muted;
+      state.adFastForwarding = true;
+      debugLog('Fast-forward started; saved pre-ad state', {
+        rate: state.preAdPlaybackRate,
+        muted: state.preAdMuted
+      });
     }
 
-    if (video.currentTime >= duration - 0.1) {
-      return false;
+    // Force maximum speed and mute. Re-applied every cycle in case
+    // YouTube's player resets them between ticks.
+    if (video.playbackRate < 16) {
+      video.playbackRate = 16;
+    }
+    if (!video.muted) {
+      video.muted = true;
     }
 
-    try {
-      video.currentTime = duration;
-      debugLog('Set video.currentTime to end of ad', duration);
-      return true;
-    } catch (err) {
-      debugLog('video.currentTime assignment failed:', err?.message || err);
-      return false;
+    return true;
+  };
+
+  // Restores the user's original playback rate and mute state once
+  // the ad is no longer showing.
+  const restorePlayback = () => {
+    if (!state.adFastForwarding) {
+      return;
     }
+
+    const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+    if (video instanceof HTMLVideoElement) {
+      video.playbackRate = state.preAdPlaybackRate ?? 1;
+      video.muted = state.preAdMuted ?? false;
+      debugLog('Restored pre-ad playback state', {
+        rate: video.playbackRate,
+        muted: video.muted
+      });
+    }
+
+    state.adFastForwarding = false;
+    state.preAdPlaybackRate = null;
+    state.preAdMuted = null;
   };
 
   // Injects a one-shot script into the page's main JS execution context.
@@ -433,10 +462,6 @@
           if (p) { ['skipAd', 'skipVideo', 'onSkipAd'].forEach(function (m) {
             if (typeof p[m] === 'function') { try { p[m](); } catch (e) {} }
           }); }
-        }
-        var video = document.querySelector('video.html5-main-video') || document.querySelector('video');
-        if (video && isFinite(video.duration) && video.duration > 0 && video.currentTime < video.duration - 0.1) {
-          try { video.currentTime = video.duration; } catch (e) {}
         }
       })();`;
       (document.head || document.documentElement).appendChild(script);
@@ -538,7 +563,7 @@
       debugLog('Ad still showing after click; retrying');
 
       try {
-        skipAdViaVideoEnd();
+        fastForwardAd();
         tryMainWorldSkip();
         tryPlayerApiSkip();
 
@@ -568,15 +593,19 @@
     debugLog('Ad signals:', adSignals);
 
     if (!adLikelyShowing) {
+      // Ad finished — restore the user's playback settings.
+      if (state.adFastForwarding) {
+        restorePlayback();
+        console.log(`[AASFY ${BUILD_SERIAL}] Ad ended; restored playback`);
+      }
       return;
     }
 
-    // Strategy 1: force video to end — bypasses isTrusted checks entirely.
-    if (skipAdViaVideoEnd()) {
-      console.log(`[AASFY ${BUILD_SERIAL}] Ad skip via video end`);
-    }
+    // Strategy 1: mute + 16x playback speed so the ad finishes in ~2s.
+    // Re-applied every cycle in case YouTube's player resets it.
+    fastForwardAd();
 
-    // Strategy 2: main-world injection to reach window.yt APIs.
+    // Strategy 2: main-world injection to reach window.yt internal APIs.
     tryMainWorldSkip();
 
     // Strategy 3: player API methods visible from content-script world.
@@ -584,8 +613,8 @@
       console.log(`[AASFY ${BUILD_SERIAL}] Ad skip via player API`);
     }
 
-    // Strategy 4: find and click the skip button (fallback for cases
-    // where strategies 1-3 are blocked or unavailable).
+    // Strategy 4: find and click the skip button (still tried in case
+    // YouTube changes their isTrusted policy in the future).
     const target = findSkipTarget();
     if (target) {
       debugLog('Skip target detected; queuing click');
