@@ -20,12 +20,6 @@ h2 {
   margin: 0 0 10px;
 }
 
-/* Section title styling (used for custom identifier section). */
-h3 {
-  margin: 0 0 8px;
-  color: #2f2f2f;
-}
-
 /* Body copy style shared by paragraph tags. */
 p {
   color: #555;
@@ -90,75 +84,34 @@ button:hover {
   color: #333;
 }
 
-/* Wrapper card for custom identifier controls/list. */
-.custom-identifiers {
+/* Ad counter stats row. */
+.ad-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ad-stats .stat {
+  flex: 1;
   background: #fff;
   border: 1px solid #e4e4e7;
   border-radius: 8px;
-  padding: 12px;
+  padding: 10px;
+  text-align: center;
 }
 
-/* Helper text under identifier section title. */
-.help-text {
-  font-size: 12px;
+.ad-stats .stat-value {
+  display: block;
+  font-size: 22px;
+  font-weight: 700;
+  color: #166534;
+}
+
+.ad-stats .stat-label {
+  font-size: 11px;
   color: #666;
-  margin-bottom: 8px;
-}
-
-/* Row containing text input + add button. */
-.input-row {
-  display: flex;
-  gap: 8px;
-}
-
-/* Text input for entering selector/text identifiers. */
-input[type='text'] {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid #cbd5e1;
-  border-radius: 4px;
-}
-
-/* Scrollable list container for saved identifiers. */
-#identifierList {
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-  max-height: 140px;
-  overflow-y: auto;
-}
-
-/* Per-identifier row layout. */
-#identifierList li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-/* Removes divider on final list row for cleaner finish. */
-#identifierList li:last-child {
-  border-bottom: none;
-}
-
-/* Empty list placeholder style. */
-#identifierList li.empty {
-  color: #777;
-  font-size: 13px;
-}
-
-/* Remove-button styling (overrides shared button colors). */
-button.remove {
-  background: #ef4444;
-  padding: 5px 9px;
-  font-size: 12px;
-}
-
-/* Remove-button hover styling. */
-button.remove:hover {
-  background: #dc2626;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 /* Build serial label shown at the bottom for version verification. */
@@ -168,4 +121,57 @@ button.remove:hover {
   font-size: 12px;
   color: #555;
   text-align: right;
+}
+
+/* Dark mode support. */
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #1e1e1e;
+    color: #e0e0e0;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
+  }
+
+  h2 {
+    color: #e0e0e0;
+  }
+
+  p {
+    color: #aaa;
+  }
+
+  .pill {
+    background: #444;
+    color: #ccc;
+  }
+
+  .pill.active {
+    background: #1a3a2a;
+    color: #6ee7a0;
+  }
+
+  .pill.inactive {
+    background: #3a1a1a;
+    color: #f87171;
+  }
+
+  .debug-toggle {
+    color: #ccc;
+  }
+
+  .ad-stats .stat {
+    background: #2a2a2a;
+    border-color: #444;
+  }
+
+  .ad-stats .stat-value {
+    color: #6ee7a0;
+  }
+
+  .ad-stats .stat-label {
+    color: #999;
+  }
+
+  .build-serial {
+    color: #888;
+  }
 }

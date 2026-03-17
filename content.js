@@ -3,25 +3,24 @@
 // This script runs on YouTube pages and is responsible for:
 // 1) reading extension settings,
 // 2) detecting when an ad is currently showing,
-// 3) finding the most likely "Skip" control,
-// 4) attempting a robust click sequence,
-// 5) retrying when YouTube delays enablement of the skip button.
+// 3) muting + fast-forwarding ads at 16x speed,
+// 4) trying YouTube Player API skip methods as an instant fallback,
+// 5) auto-dismissing overlay ad banners,
+// 6) tracking ads handled (session + lifetime).
 (() => {
   // Build serial to help confirm the loaded extension version in logs/UI.
-  const BUILD_SERIAL = 'AASFY-PR-2026-03-16-13';
+  const BUILD_SERIAL = 'AASFY-PR-2026-03-17-04';
 
   // Storage keys used across popup + content script.
   const STORAGE_KEYS = {
     activationState: 'activationState',
-    debugMode: 'debugMode',
-    customSkipIdentifiers: 'customSkipIdentifiers'
+    debugMode: 'debugMode'
   };
 
   // Default settings used when a key does not yet exist in storage.
   const DEFAULTS = {
     activationState: 'active',
-    debugMode: false,
-    customSkipIdentifiers: []
+    debugMode: false
   };
 
   // Known skip-button selectors that YouTube has used historically.
@@ -39,33 +38,33 @@
 
   const AD_UI_CONTAINERS = ['#movie_player.ad-showing', '.video-ads.ytp-ad-module', '.ytp-ad-player-overlay', '.ytp-ad-module'];
 
-  // Multi-language keywords and common phrases used in skip controls.
-  const DEFAULT_TEXT_PATTERNS = ['skip', 'skip ad', 'skip ads', 'saltar', 'überspringen', 'ignorer', '跳过'];
-
-  // Timing controls to avoid over-clicking and to support short retries.
-  const CLICK_DEBOUNCE_MS = 1200;
-  const RETRY_AFTER_CLICK_MS = 650;
-  const HUMANIZED_CLICK_DELAY_MIN_MS = 120;
-  const HUMANIZED_CLICK_DELAY_MAX_MS = 260;
-
   // Runtime state cache.
   // state.active starts as false so applySettings can detect the initial
   // false→true transition and call startMonitoring() exactly once.
   const state = {
     active: false,
     debugMode: DEFAULTS.debugMode,
-    customSkipIdentifiers: [],
     intervalId: null,
     observer: null,
     observerQueued: false,
     lastObserverRunTimestamp: 0,
     lastDebugAdState: null,
-    pendingClickTimeoutId: null,
-    pendingClickTarget: null,
-    lastClickTimestamp: 0,
     adFastForwarding: false,
     preAdPlaybackRate: null,
-    preAdMuted: null
+    preAdMuted: null,
+    sessionAdCount: 0
+  };
+
+  // Returns true if the extension context has been invalidated (e.g. after
+  // the extension is reloaded while this script is still running on the page).
+  // When this happens, all chrome.* API calls throw. We detect it early and
+  // tear down monitoring to stop the error spam.
+  const isContextInvalidated = () => {
+    try {
+      return !chrome.runtime?.id;
+    } catch {
+      return true;
+    }
   };
 
   // Debug logger (active only when debugMode is enabled from popup).
@@ -75,18 +74,6 @@
     }
 
     console.log('[AASFY DEBUG]', ...parts);
-  };
-
-  // Normalizes custom selector/text entries provided by the user.
-  const sanitizeCustomIdentifiers = (value) => {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-
-    return value
-      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-      .filter((entry) => entry.length > 0)
-      .slice(0, 25);
   };
 
   // True only when an element is visually and geometrically visible.
@@ -110,27 +97,6 @@
       rect.width > 0 &&
       rect.height > 0
     );
-  };
-
-  // True only when an element appears actionable (disabled states only).
-  const isElementEnabled = (element) => {
-    if (!(element instanceof HTMLElement)) {
-      return false;
-    }
-
-    const isDisabledByAttr = element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true';
-    const hasDisabledClass = (element.className || '').toString().toLowerCase().includes('disabled');
-
-    return !isDisabledByAttr && !hasDisabledClass;
-  };
-
-  // Finds nearest clickable ancestor because text spans are often nested.
-  const getClickableElement = (element) => {
-    if (!(element instanceof HTMLElement)) {
-      return null;
-    }
-
-    return element.closest('button, [role="button"]') || element;
   };
 
   // Helper to safely check visibility of any CSS selector.
@@ -211,189 +177,99 @@
     return Boolean(adShowingPlayer && adShowingPlayer.contains(element));
   };
 
-  // Collects searchable text from visible label sources.
-  const getElementText = (element) => {
-    const rawText = [
-      element.textContent || '',
-      element.getAttribute('aria-label') || '',
-      element.getAttribute('title') || ''
-    ].join(' ');
+  // Overlay element ID and label ID used to avoid duplicates.
+  const OVERLAY_ID = 'aasfy-skip-overlay';
+  const OVERLAY_LABEL_ID = 'aasfy-skip-overlay-label';
 
-    return rawText.trim().toLowerCase();
+  // Shows a dark overlay on the video player while fast-forwarding.
+  const showSkipOverlay = () => {
+    if (document.getElementById(OVERLAY_ID)) return;
+
+    const player = document.getElementById('movie_player');
+    if (!player) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = OVERLAY_ID;
+    overlay.setAttribute('style', [
+      'position: absolute',
+      'top: 0',
+      'left: 0',
+      'width: 100%',
+      'height: 100%',
+      'background: rgba(0, 0, 0, 0.85)',
+      'display: flex',
+      'align-items: center',
+      'justify-content: center',
+      'z-index: 9999',
+      'pointer-events: none'
+    ].join('; '));
+
+    const label = document.createElement('span');
+    label.id = OVERLAY_LABEL_ID;
+    label.setAttribute('style', [
+      'color: #fff',
+      'font-family: Verdana, Geneva, sans-serif',
+      'font-size: 56px',
+      'font-weight: 700',
+      'letter-spacing: 1px'
+    ].join('; '));
+    label.textContent = 'Skipping Ad';
+
+    overlay.appendChild(label);
+    player.style.position = player.style.position || 'relative';
+    player.appendChild(overlay);
   };
 
-  // Selector-based candidate discovery.
-  const collectSelectorCandidates = (selectors) => {
-    const candidates = [];
+  // Tracks when the CTA screen started so we can show a countdown.
+  let ctaStartTimestamp = 0;
+  const CTA_COUNTDOWN_SECONDS = 5;
 
-    selectors.forEach((selector) => {
-      try {
-        const nodes = document.querySelectorAll(selector);
-        nodes.forEach((node) => candidates.push({ element: node, source: 'selector' }));
-      } catch (error) {
-        debugLog('Invalid selector ignored:', selector, error?.message || error);
+  // Updates the overlay label text with phase-appropriate messages.
+  const updateSkipOverlay = () => {
+    const label = document.getElementById(OVERLAY_LABEL_ID);
+    if (!label) return;
+
+    const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+    if (!(video instanceof HTMLVideoElement)) return;
+
+    // Video ended/paused but ad-showing still present = CTA screen.
+    if (video.ended || video.paused) {
+      if (ctaStartTimestamp === 0) {
+        ctaStartTimestamp = Date.now();
       }
-    });
-
-    return candidates;
-  };
-
-  // Text/semantic candidate discovery for evolving YouTube markup.
-  const collectSemanticCandidates = (patterns) => {
-    const semanticCandidates = [];
-    const clickableElements = document.querySelectorAll('button, [role="button"], .ytp-button');
-
-    clickableElements.forEach((element) => {
-      if (!isElementVisible(element)) {
-        return;
+      const elapsed = (Date.now() - ctaStartTimestamp) / 1000;
+      const remaining = Math.max(0, CTA_COUNTDOWN_SECONDS - Math.floor(elapsed));
+      if (remaining > 0) {
+        label.textContent = `Ad ending in ${remaining}`;
+      } else {
+        label.textContent = 'Ad ending\u2026';
       }
-
-      const text = getElementText(element);
-      if (!text) {
-        return;
-      }
-
-      const matchesPattern = patterns.some((pattern) => text.includes(pattern));
-      if (matchesPattern) {
-        semanticCandidates.push({ element, source: 'semantic' });
-      }
-    });
-
-    return semanticCandidates;
-  };
-
-  // Candidate ranking engine that picks the strongest skip target.
-  const findSkipTarget = () => {
-    const normalizedCustomIdentifiers = sanitizeCustomIdentifiers(state.customSkipIdentifiers);
-    const selectorCandidates = [
-      ...collectSelectorCandidates(DEFAULT_SELECTORS),
-      ...collectSelectorCandidates(normalizedCustomIdentifiers)
-    ];
-
-    const textPatterns = [...DEFAULT_TEXT_PATTERNS, ...normalizedCustomIdentifiers.map((entry) => entry.toLowerCase())];
-    const semanticCandidates = collectSemanticCandidates(textPatterns);
-    const deduplicated = new Map();
-
-    [...selectorCandidates, ...semanticCandidates].forEach((candidate) => {
-      const clickable = getClickableElement(candidate.element);
-      if (!clickable || !isElementVisible(clickable) || !isInsideAdUi(clickable)) {
-        return;
-      }
-
-      if (!deduplicated.has(clickable)) {
-        deduplicated.set(clickable, { source: candidate.source, score: 0 });
-      }
-
-      const meta = deduplicated.get(clickable);
-      const text = getElementText(clickable);
-      const classText = (clickable.className || '').toString().toLowerCase();
-
-      if (candidate.source === 'selector') {
-        meta.score += 4;
-      }
-
-      if (textPatterns.some((pattern) => text.includes(pattern))) {
-        meta.score += 3;
-      }
-
-      if (classText.includes('ad-skip') || classText.includes('skip')) {
-        meta.score += 2;
-      }
-
-      if (classText.includes('ytp-ad-component--clickable')) {
-        meta.score += 3;
-      }
-
-      if (clickable.closest('.ytp-ad-skip-button-container')) {
-        meta.score += 3;
-      }
-
-      if (isElementEnabled(clickable)) {
-        meta.score += 4;
-      }
-    });
-
-    const rankedCandidates = [...deduplicated.entries()]
-      .map(([element, meta]) => ({ element, score: meta.score, source: meta.source }))
-      .sort((a, b) => b.score - a.score);
-
-    debugLog('Candidate counts', {
-      selectorCandidates: selectorCandidates.length,
-      semanticCandidates: semanticCandidates.length,
-      eligibleCandidates: rankedCandidates.length,
-      topScore: rankedCandidates[0]?.score || 0
-    });
-
-    return rankedCandidates[0]?.element || null;
-  };
-
-  // Clamps coordinates to valid viewport bounds.
-  const clampToViewport = (x, y) => {
-    const maxX = Math.max(0, window.innerWidth - 1);
-    const maxY = Math.max(0, window.innerHeight - 1);
-    return {
-      x: Math.min(maxX, Math.max(0, Math.round(x))),
-      y: Math.min(maxY, Math.max(0, Math.round(y)))
-    };
-  };
-
-  // Dispatches a full pointer + mouse event lifecycle on an element.
-  const dispatchMouseLifecycle = (element, x, y) => {
-    ['mouseover', 'mouseenter', 'mousemove', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((eventName) => {
-      const EventCtor = eventName.startsWith('pointer') ? (window.PointerEvent || window.MouseEvent) : window.MouseEvent;
-      element.dispatchEvent(
-        new EventCtor(eventName, {
-          bubbles: true,
-          cancelable: true,
-          view: window,
-          clientX: x,
-          clientY: y,
-          button: 0,
-          buttons: eventName.includes('down') ? 1 : 0,
-          detail: eventName === 'click' ? 1 : 0
-        })
-      );
-    });
-  };
-
-  // Returns a small randomized delay to make click timing less robotic.
-  const getHumanizedDelayMs = () => {
-    const span = Math.max(0, HUMANIZED_CLICK_DELAY_MAX_MS - HUMANIZED_CLICK_DELAY_MIN_MS);
-    return HUMANIZED_CLICK_DELAY_MIN_MS + Math.floor(Math.random() * (span + 1));
-  };
-
-  const isNativeSkipButton = (target) => {
-    if (!(target instanceof HTMLElement)) {
-      return false;
-    }
-
-    const classText = (target.className || '').toString().toLowerCase();
-    const idText = (target.id || '').toString().toLowerCase();
-    return (
-      classText.includes('ytp-ad-skip-button') ||
-      classText.includes('ytp-skip-ad-button') ||
-      idText.startsWith('skip-button:')
-    );
-  };
-
-  // Schedules one click attempt after a short human-like delay.
-  const queueClickTarget = (target) => {
-    state.pendingClickTarget = target;
-
-    if (state.pendingClickTimeoutId !== null) {
-      debugLog('Updated queued skip target while timer already pending');
       return;
     }
 
-    const delayMs = isNativeSkipButton(target) || target?.closest?.('.ytp-ad-skip-button-container') ? 0 : getHumanizedDelayMs();
-    state.pendingClickTimeoutId = window.setTimeout(() => {
-      const queuedTarget = state.pendingClickTarget;
-      state.pendingClickTimeoutId = null;
-      state.pendingClickTarget = null;
-      clickTarget(queuedTarget, { bypassDebounce: delayMs === 0 });
-    }, delayMs);
+    // Reset CTA timer when video is still playing.
+    ctaStartTimestamp = 0;
 
-    debugLog('Scheduled click attempt with delay (ms):', delayMs);
+    const remaining = video.duration - video.currentTime;
+    if (!isFinite(remaining) || remaining <= 0) {
+      label.textContent = 'Skipping Ad';
+      return;
+    }
+
+    // Show real-world seconds remaining (accounting for 16x speed).
+    const realSeconds = Math.ceil(remaining / video.playbackRate);
+    if (realSeconds <= 1) {
+      label.textContent = 'Almost done\u2026';
+    } else {
+      label.textContent = 'Skipping Ad';
+    }
+  };
+
+  // Removes the skip overlay when the ad ends.
+  const removeSkipOverlay = () => {
+    ctaStartTimestamp = 0;
+    const overlay = document.getElementById(OVERLAY_ID);
+    if (overlay) overlay.remove();
   };
 
   // Mutes the video and sets playback rate to 16x during an ad so the ad
@@ -413,6 +289,7 @@
       state.preAdPlaybackRate = video.playbackRate;
       state.preAdMuted = video.muted;
       state.adFastForwarding = true;
+      showSkipOverlay();
       debugLog('Fast-forward started; saved pre-ad state', {
         rate: state.preAdPlaybackRate,
         muted: state.preAdMuted
@@ -451,6 +328,41 @@
     state.adFastForwarding = false;
     state.preAdPlaybackRate = null;
     state.preAdMuted = null;
+    removeSkipOverlay();
+  };
+
+  // Auto-dismisses overlay ad banners (bottom banners, promotions).
+  const OVERLAY_CLOSE_SELECTORS = [
+    '.ytp-ad-overlay-close-button',
+    '.ytp-ad-overlay-close-container button',
+    '[class*="ad-overlay-close"]'
+  ];
+
+  const dismissOverlayAds = () => {
+    OVERLAY_CLOSE_SELECTORS.forEach((selector) => {
+      try {
+        document.querySelectorAll(selector).forEach((button) => {
+          if (isElementVisible(button)) {
+            button.click();
+            debugLog('Dismissed overlay ad via', selector);
+          }
+        });
+      } catch (error) {
+        debugLog('Overlay dismiss failed:', selector, error?.message || error);
+      }
+    });
+  };
+
+  // Increments the lifetime ad counter in chrome.storage.local.
+  const incrementLifetimeAdCount = () => {
+    try {
+      chrome.storage.local.get({ lifetimeAdCount: 0 }, (data) => {
+        if (chrome.runtime.lastError) return;
+        chrome.storage.local.set({ lifetimeAdCount: (data.lifetimeAdCount || 0) + 1 });
+      });
+    } catch {
+      // Extension context invalidated — ignore.
+    }
   };
 
   // Invokes YouTube player API fallback when UI click path is blocked.
@@ -474,111 +386,32 @@
       }
     }
 
-    
-  };
-
-  // Performs a guarded click flow with debounce + eligibility checks.
-  // Click strategy (three layers):
-  //   1. YouTube Player API — bypasses UI entirely, most reliable when available.
-  //   2. Pointer + mouse event sequence — covers frameworks that bind to pointer events.
-  //   3. Direct .click() — covers standard DOM click handlers.
-  const clickTarget = (target, options = {}) => {
-    const { bypassDebounce = false } = options;
-    const now = Date.now();
-    if (!bypassDebounce && now - state.lastClickTimestamp < CLICK_DEBOUNCE_MS) {
-      debugLog('Skipped click due to debounce window', {
-        sinceLastMs: now - state.lastClickTimestamp,
-        debounceMs: CLICK_DEBOUNCE_MS
-      });
-      return;
-    }
-
-    if (!target) {
-      debugLog('Skipped click because no target was queued');
-      return;
-    }
-
-    if (!target.isConnected || !isElementVisible(target) || !isInsideAdUi(target)) {
-      debugLog('Skipped click because target became non-actionable before execution');
-      return;
-    }
-
-    if (!isElementEnabled(target)) {
-      debugLog('Skip target found but not yet enabled; waiting for next cycle');
-      return;
-    }
-
-    state.lastClickTimestamp = now;
-    const targetSummary = target.outerHTML?.slice(0, 180) || '<unknown>';
-    console.log(`[AASFY ${BUILD_SERIAL}] Click attempt starting`);
-    debugLog('Click target before attempt:', targetSummary);
-
-    try {
-      const rect = target.getBoundingClientRect();
-      const center = clampToViewport(rect.left + rect.width / 2, rect.top + rect.height / 2);
-
-      // Layer 1: Player API (most reliable, bypasses UI entirely).
-      if (tryPlayerApiSkip()) {
-        debugLog('Player API skip invoked');
-      }
-
-      // Layer 2: Pointer + mouse events on the button and its direct parent.
-      dispatchMouseLifecycle(target, center.x, center.y);
-      if (target.parentElement instanceof HTMLElement) {
-        dispatchMouseLifecycle(target.parentElement, center.x, center.y);
-      }
-
-      // Layer 3: Direct DOM click.
-      target.click();
-    } catch (err) {
-      debugLog('Click attempt error:', err?.message || err);
-    }
-
-    console.log(`[AASFY ${BUILD_SERIAL}] Click attempt finished`);
-
-    // Retry after a short delay if the ad is still showing.
-    window.setTimeout(() => {
-      if (!state.active || !isAdLikelyShowing()) {
-        return;
-      }
-
-      debugLog('Ad still showing after click; retrying');
-
-      try {
-        fastForwardAd();
-
-        tryPlayerApiSkip();
-
-        if (target.isConnected && isElementVisible(target)) {
-          const rect = target.getBoundingClientRect();
-          const center = clampToViewport(rect.left + rect.width / 2, rect.top + rect.height / 2);
-          dispatchMouseLifecycle(target, center.x, center.y);
-          target.click();
-        }
-      } catch (err) {
-        debugLog('Retry click error:', err?.message || err);
-      }
-
-      attemptSkipAd();
-    }, RETRY_AFTER_CLICK_MS);
+    return false;
   };
 
   // Single pass: detect ad state, then attempt all skip strategies.
   const attemptSkipAd = () => {
+    // If the extension was reloaded, stop all monitoring to prevent
+    // "Extension context invalidated" errors from spamming the console.
+    if (isContextInvalidated()) {
+      stopMonitoring();
+      restorePlayback();
+      return;
+    }
+
     if (!state.active) {
       return;
     }
 
-    // When already fast-forwarding, only do the minimum: check if the ad
-    // ended and re-apply playback rate. Skip the expensive button search,
-    // candidate ranking, and click attempts — they generate heavy log
-    // traffic and accomplish nothing while the ad plays through at 16x.
+    // When already fast-forwarding, only check if the ad ended and
+    // re-apply playback rate (YouTube may reset it between ticks).
     if (state.adFastForwarding) {
       if (!isAdLikelyShowing()) {
         restorePlayback();
         console.log(`[AASFY ${BUILD_SERIAL}] Ad ended; restored playback`);
       } else {
         fastForwardAd();
+        updateSkipOverlay();
       }
       return;
     }
@@ -599,19 +432,23 @@
     }
 
     // First ad detection — start fast-forwarding immediately.
-    console.log(`[AASFY ${BUILD_SERIAL}] Ad detected; muting + fast-forwarding at 16x`);
+    state.sessionAdCount++;
+    try {
+      chrome.storage.local.set({ sessionAdCount: state.sessionAdCount });
+    } catch {
+      // Extension context invalidated — ignore.
+    }
+    incrementLifetimeAdCount();
+    console.log(`[AASFY ${BUILD_SERIAL}] Ad #${state.sessionAdCount} detected; muting + fast-forwarding at 16x`);
     fastForwardAd();
 
-    // Also try other skip strategies on first detection.
+    // Try player API skip as an instant fallback.
     if (tryPlayerApiSkip()) {
       console.log(`[AASFY ${BUILD_SERIAL}] Ad skip via player API`);
     }
 
-    const target = findSkipTarget();
-    if (target) {
-      debugLog('Skip target detected; queuing click');
-      queueClickTarget(target);
-    }
+    // Auto-dismiss overlay ad banners.
+    dismissOverlayAds();
   };
 
   // Throttles observer-triggered attempts to at most once per 2 seconds.
@@ -645,13 +482,6 @@
       state.intervalId = null;
     }
 
-    if (state.pendingClickTimeoutId !== null) {
-      clearTimeout(state.pendingClickTimeoutId);
-      state.pendingClickTimeoutId = null;
-    }
-
-    state.pendingClickTarget = null;
-
     if (state.observer) {
       state.observer.disconnect();
       state.observer = null;
@@ -681,12 +511,10 @@
 
     state.active = settings.activationState === 'active';
     state.debugMode = Boolean(settings.debugMode);
-    state.customSkipIdentifiers = sanitizeCustomIdentifiers(settings.customSkipIdentifiers);
 
     debugLog('Settings applied', {
       active: state.active,
-      debugMode: state.debugMode,
-      customIdentifierCount: state.customSkipIdentifiers.length
+      debugMode: state.debugMode
     });
 
     if (state.active && !previousActive) {
@@ -710,8 +538,7 @@
     chrome.storage.sync.get(DEFAULTS, (result) => {
       const mergedSettings = {
         activationState: result.activationState || DEFAULTS.activationState,
-        debugMode: Boolean(result.debugMode),
-        customSkipIdentifiers: sanitizeCustomIdentifiers(result.customSkipIdentifiers)
+        debugMode: Boolean(result.debugMode)
       };
 
       chrome.storage.sync.set(mergedSettings);
@@ -726,8 +553,7 @@
 
     const hasRelevantChange =
       Boolean(changes[STORAGE_KEYS.activationState]) ||
-      Boolean(changes[STORAGE_KEYS.debugMode]) ||
-      Boolean(changes[STORAGE_KEYS.customSkipIdentifiers]);
+      Boolean(changes[STORAGE_KEYS.debugMode]);
 
     if (!hasRelevantChange) {
       return;
