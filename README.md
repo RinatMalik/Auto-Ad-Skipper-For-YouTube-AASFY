@@ -1,45 +1,41 @@
-# Auto-Ad-Skipper-for-YouTube (AASFY)
-Chrome Extension that automatically skips YouTube ads 
+# Auto Ad Skipper for YouTube (AASFY)
 
+## Probably the only YouTube ad skipper that still works.
 
-This is a very simple chrome extension which will automatically press the skip button on YouTube videos. This is not an Ad Blocker so it won't be blocked by YouTube. It doesn't block ads but simply presses the Skip button automatically when possible.
+Most ad-skipping extensions have been disabled by YouTube's recent updates. AASFY takes a fundamentally different approach — instead of blocking ads or simulating button clicks (both of which YouTube now defeats), it mutes and fast-forwards through ads at 16x speed, so each ad is over in 1–2 seconds with zero audio. YouTube sees the ad as played, so there's nothing to block.
 
-The extension made particularly for differently abled people who sometimes have difficulty pressing the skip button and to help disabled people skip ads on YouTube if they wish to.
+## How it works
 
-The extension works,
- 
-- in full screen
-- for multiple consecutive ads
-- for ads in the middle of long videos
-- when videos are playing as part of a playlist
-- when videos are playing in "picture-in-picture" mode
+When an ad starts, AASFY instantly:
+- Mutes the audio
+- Sets playback speed to 16x (Chrome's maximum)
+- Shows a dark overlay on the player so you know what's happening
+- Restores your original volume and speed the moment the ad ends
+- A live countdown tells you exactly how long until the ad is gone.
 
+## What it handles
 
-Also,
+- Skippable and non-skippable in-stream ads
+- Multiple consecutive ads
+- Mid-roll ads in long videos
+- Ads in playlists
+- Full-screen mode
+- Picture-in-picture mode
+- Overlay / banner ads (auto-dismissed)
 
-- it doesn't track you
-- it doesn't collect any of your data
-- the code is open source and available to download in GitHub
-- any developer collabroation is welcome
+## Privacy & transparency
 
+- Does not block ads — YouTube cannot detect or disable it
+- Does not track you or collect any data
+- No network requests made by the extension
+- Session and lifetime ad counts shown in the popup (stored locally, never transmitted)
+- Fully open source on GitHub — read every line yourself
+- This is not an ad blocker. It does not prevent ads from loading or interfere with YouTube's revenue model. Ads play to completion, just silently and 16x faster.
 
-Features in pipeline for future release - 
+Originally created to help differently-abled users who have difficulty pressing the skip button. Useful for everyone tired of waiting.
 
-- mute the audio of the chrome tab for unskippable ads, and bring back to original audio levels after the ad finished playing.
-- fast forward through the unskippable ads.
-- reduce brightness to lowest when unskippable ads are playing, and bring back to original brightness levels after the ad finished playing.
+## Release history
 
-*V1.0.0 doesn't do anything on unskippable ads.*
-
-
-Release history:
-
-V1.1.0 - Added CSS file, updated name, description, appearance, logo, screenshot
-V1.0.0 - Initial Release
-
-## Development notes (latest)
-
-- Skip detection now uses multiple strategies (selector list + semantic text matching) instead of a single hard-coded selector.
-- Activation/deactivation updates live via storage change listeners; no page refresh is required.
-- Debug mode can be toggled from popup, and custom selectors/identification strings can be added from popup and stored in `chrome.storage.sync`.
-
+- V2.0.0 — Complete rewrite. Replaced click-based skip strategy with mute + 16x fast-forward. Added skip overlay with live countdown, session/lifetime ad counter, dark mode popup, auto-dismiss for banner ads. Removed all code that YouTube was able to block.
+- V1.1.0 — Added CSS file, updated name, description, appearance, logo, screenshot
+- V1.0.0 — Initial release
