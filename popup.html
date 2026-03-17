@@ -13,8 +13,20 @@
   <!-- Popup heading + short purpose description. -->
   <h2>Auto Ad Skipper For YouTube (AASFY)</h2>
   <p>
-    This extension watches for YouTube ad skip controls and clicks them when available.
+    Automatically mutes and fast-forwards YouTube ads at 16x speed for a seamless viewing experience.
   </p>
+
+  <!-- Ad counter stats. -->
+  <div class="ad-stats">
+    <div class="stat">
+      <span class="stat-value" id="sessionAdCount">0</span>
+      <span class="stat-label">This session</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="lifetimeAdCount">0</span>
+      <span class="stat-label">All time</span>
+    </div>
+  </div>
 
   <!-- Activation status row with state pill and toggle button. -->
   <div class="row">
@@ -27,23 +39,6 @@
     <input type="checkbox" id="debugToggle">
     Enable debug mode
   </label>
-
-  <!-- Custom selector/text configuration section for evolving YouTube UIs. -->
-  <section class="custom-identifiers">
-    <h3>Custom selector / identifier</h3>
-    <p class="help-text">
-      Add a CSS selector (for example <code>.my-new-skip-button</code>) or text hint (for example <code>skip now</code>).
-    </p>
-
-    <!-- Input row for adding a new custom identifier. -->
-    <div class="input-row">
-      <input id="customIdentifierInput" type="text" placeholder="Enter selector or text hint">
-      <button id="addIdentifierButton" type="button">Add</button>
-    </div>
-
-    <!-- Existing custom identifiers render here. -->
-    <ul id="identifierList"></ul>
-  </section>
 
   <!-- Build serial helps confirm the currently loaded extension build. -->
   <p id="buildSerialLabel" class="build-serial">Build serial: loading...</p>
